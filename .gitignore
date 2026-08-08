@@ -1,0 +1,37 @@
+# === Secrets — NEVER commit ===
+.env
+.env.local
+**/.env.local
+**/.env*.local
+
+# === Dependencies & build output ===
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+out/
+build/
+*.tsbuildinfo
+
+# === Not part of the app: input PDFs, private recordings, local binaries, generated docs ===
+*.pdf
+*.mp4
+*.wav
+*.docx
+cloudflared.exe
+transcribe.py
+prudential_12june_transcript.txt
+
+# === Tooling / editor / OS ===
+.claude/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# === Local launcher (machine-specific paths) ===
+# Start-PRUAssist.bat is committed as a reference but tuned for the original PC.
+
+# === AI-agent instructions (kept locally, not published) ===
+**/AGENTS.md
+**/CLAUDE.md

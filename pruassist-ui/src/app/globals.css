@@ -1,0 +1,1118 @@
+:root {
+  /* ===================================================================
+     PRUAssist — matched to the generated landing (pruassist-clear-guide).
+     Warm off-white canvas · deep blue-ink text · rich red accent ·
+     Fraunces serif headings · Inter body · mono eyebrows · pill buttons.
+     Token + class names are stable so the app's functional pages keep working.
+     =================================================================== */
+
+  /* ---- surfaces: warm off-white ---- */
+  --paper: oklch(0.995 0.002 90);
+  --paper-edge: oklch(0.97 0.004 90);
+  --surface: #ffffff;
+  --surface-2: oklch(0.975 0.003 90);
+  --surface-raised: #ffffff;
+  --ink-surface: oklch(0.145 0.015 265);   /* the dark "moment" section */
+  --ink-surface-2: oklch(0.2 0.02 265);
+
+  /* ---- ink: deep blue-black, four levels ---- */
+  --ink: oklch(0.16 0.02 260);
+  --ink-2: oklch(0.34 0.02 260);
+  --ink-3: oklch(0.5 0.017 260);
+  --ink-4: oklch(0.64 0.012 260);
+  --on-ink: oklch(0.97 0.004 90);
+  --on-ink-2: oklch(0.72 0.01 260);
+
+  /* ---- borders: hairline ink ---- */
+  --line: oklch(0.16 0.02 260 / 0.10);
+  --line-soft: oklch(0.16 0.02 260 / 0.06);
+  --line-strong: oklch(0.16 0.02 260 / 0.16);
+  --line-on-ink: oklch(1 0 0 / 0.12);
+
+  /* ---- brand: the generated red ---- */
+  --pru: oklch(0.55 0.22 25);
+  --pru-press: oklch(0.48 0.2 25);
+  --pru-tint: oklch(0.55 0.22 25 / 0.08);
+  --pru-tint-2: oklch(0.55 0.22 25 / 0.14);
+  --pru-line: oklch(0.55 0.22 25 / 0.28);
+
+  /* ---- semantic ---- */
+  --sage: oklch(0.52 0.1 160);
+  --sage-tint: oklch(0.52 0.1 160 / 0.12);
+  --amber: oklch(0.58 0.12 65);
+  --amber-tint: oklch(0.58 0.12 65 / 0.13);
+  --blue: oklch(0.5 0.14 258);
+  --blue-tint: oklch(0.5 0.14 258 / 0.11);
+  --gold: oklch(0.68 0.09 80);
+  --gold-soft: oklch(0.68 0.09 80 / 0.14);
+  --gold-line: oklch(0.68 0.09 80 / 0.34);
+
+  /* ---- depth: soft warm shadows ---- */
+  --shadow-sm: 0 1px 2px oklch(0.2 0.03 265 / 0.06);
+  --shadow-card: 0 1px 2px oklch(0.2 0.03 265 / 0.05), 0 14px 34px -8px oklch(0.2 0.03 265 / 0.10);
+  --shadow-raised: 0 24px 60px -16px oklch(0.2 0.03 265 / 0.18);
+  --shadow-ink: 0 30px 70px -20px oklch(0 0 0 / 0.5);
+
+  /* ---- radii ---- */
+  --r-sm: 10px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-full: 999px;
+
+  --font-sans: var(--font-inter), -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), "SFMono-Regular", ui-monospace, monospace;
+  --font-serif: var(--font-fraunces), Georgia, "Times New Roman", serif;
+  --font-said: var(--font-read), Georgia, "Times New Roman", serif; /* the spoken advisory line */
+
+  /* legacy aliases — keep earlier components mapped onto the new palette */
+  --muted: var(--ink-3);
+  --faint: var(--ink-4);
+  --bg: var(--paper);
+  --card: var(--surface);
+  --green: var(--sage);
+  --pru-red: var(--pru);
+  --pru-red-dark: var(--pru-press);
+  --pru-red-soft: var(--pru-tint);
+  --pru-red-line: var(--pru-line);
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  color-scheme: light;
+  scroll-behavior: smooth;
+}
+body {
+  min-height: 100vh;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--font-sans);
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+::selection {
+  background: var(--pru-tint-2);
+  color: var(--pru-press);
+}
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--pru-tint-2);
+  border-radius: var(--r-sm);
+}
+
+/* subtle scrollbars */
+.pru-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.16 0.02 260 / 0.18) transparent;
+}
+.pru-scroll::-webkit-scrollbar {
+  width: 9px;
+}
+.pru-scroll::-webkit-scrollbar-thumb {
+  background: oklch(0.16 0.02 260 / 0.16);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.pru-scroll::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.16 0.02 260 / 0.28);
+  background-clip: padding-box;
+}
+
+/* ============ chrome (top nav) ============ */
+.pru-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 30px;
+  background: oklch(0.995 0.002 90 / 0.86);
+  backdrop-filter: saturate(140%) blur(12px);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+.pru-logo {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.pru-logo .mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--pru);
+  color: #fff;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  box-shadow: 0 2px 8px oklch(0.55 0.22 25 / 0.3);
+}
+.pru-logo .name {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.pru-logo .sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+}
+.pru-steps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  justify-content: center;
+}
+.pru-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink-4);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.pru-step .num {
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--surface);
+  color: var(--ink-4);
+  border: 1px solid var(--line);
+  transition: all 0.2s ease;
+}
+.pru-step.active {
+  color: var(--ink);
+}
+.pru-step.active .num {
+  background: var(--pru);
+  color: #fff;
+  border-color: var(--pru);
+}
+.pru-step.done {
+  color: var(--ink-3);
+}
+.pru-step.done .num {
+  background: var(--pru-tint-2);
+  color: var(--pru-press);
+  border-color: transparent;
+}
+.pru-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  font-weight: 500;
+}
+.pru-tag .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sage);
+  box-shadow: 0 0 0 3px var(--sage-tint);
+}
+.pru-banner {
+  background: var(--pru-tint);
+  border-bottom: 1px solid var(--pru-line);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  text-align: center;
+  padding: 9px 16px;
+  letter-spacing: -0.005em;
+}
+.pru-banner b {
+  color: var(--pru-press);
+  font-weight: 600;
+}
+
+/* ============ layout ============ */
+.pru-main {
+  padding: 30px 28px 40px;
+}
+.pru-container {
+  max-width: 1140px;
+  margin: 0 auto;
+}
+.pru-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.pru-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+
+/* ============ cards ============ */
+.pru-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 22px;
+  box-shadow: var(--shadow-card);
+}
+.pru-card.flush {
+  padding: 0;
+  overflow: hidden;
+}
+.pru-card.interactive {
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  cursor: pointer;
+}
+.pru-card.interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-raised);
+  border-color: var(--line-strong);
+}
+
+/* ============ typography ============ */
+.pru-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pru-eyebrow.pill {
+  background: var(--surface);
+  color: var(--pru-press);
+  padding: 5px 12px 4px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+}
+.pru-eyebrow.pill.green {
+  color: var(--sage);
+}
+.pru-eyebrow.gold {
+  color: var(--gold);
+}
+.pru-muted {
+  color: var(--ink-3);
+}
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+}
+.pru-serif {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.pru-display {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.02;
+}
+h1,
+h2,
+h3 {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  line-height: 1.05;
+  color: var(--ink);
+}
+
+/* ============ buttons (pill) ============ */
+.pru-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  padding: 10px 18px;
+  border-radius: var(--r-full);
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.08s ease, box-shadow 0.14s ease;
+}
+.pru-btn:hover {
+  border-color: var(--ink-4);
+}
+.pru-btn:active {
+  transform: translateY(1px);
+}
+.pru-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+.pru-btn-primary {
+  background: var(--pru);
+  border-color: var(--pru);
+  color: #fff;
+  box-shadow: 0 2px 10px oklch(0.55 0.22 25 / 0.28);
+}
+.pru-btn-primary:hover {
+  background: var(--pru-press);
+  border-color: var(--pru-press);
+}
+.pru-btn-sm {
+  padding: 7px 13px;
+  font-size: 13px;
+}
+
+/* ============ chips / inputs ============ */
+.pru-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.14s ease;
+}
+.pru-chip:hover {
+  border-color: var(--ink-4);
+}
+.pru-chip.on {
+  background: var(--pru);
+  border-color: var(--pru);
+  color: #fff;
+}
+.pru-input {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 11px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.pru-input::placeholder {
+  color: var(--ink-4);
+}
+.pru-input:focus {
+  outline: none;
+  border-color: var(--pru);
+  box-shadow: 0 0 0 3px var(--pru-tint);
+}
+
+/* ============ live pointers (autocue) ============ */
+.pru-pointer {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+  margin-bottom: 11px;
+  box-shadow: var(--shadow-sm);
+  animation: pru-rise 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.pru-pointer:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-card);
+}
+.pru-pointer .cat {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.pru-pointer .title {
+  font-weight: 600;
+  font-size: 13.5px;
+  margin: 10px 0 4px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.pru-pointer .body {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.pru-pointer .actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pru-pointer .actions .link {
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 6px 8px;
+  border-radius: 7px;
+  transition: all 0.12s ease;
+}
+.pru-pointer .actions .link:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+/* the autocue "say this" — the signature (matches the generated hero card) */
+.pru-pointer.say {
+  border-color: var(--pru-line);
+  background: var(--pru-tint);
+}
+.pru-pointer.say .body {
+  font-family: var(--font-serif);
+  font-size: 16.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  font-weight: 400;
+}
+
+/* category colors */
+.cat-concern { background: var(--amber-tint); color: var(--amber); }
+.cat-do { background: var(--pru-tint); color: var(--pru-press); }
+.cat-line { background: var(--blue-tint); color: var(--blue); }
+.cat-explain { background: var(--sage-tint); color: var(--sage); }
+.cat-compare { background: var(--gold-soft); color: var(--gold); }
+.cat-follow { background: oklch(0.55 0.1 200 / 0.12); color: oklch(0.5 0.1 200); }
+
+/* ============ transcript ============ */
+.pru-bubble {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 11px 14px;
+  margin-bottom: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  animation: pru-rise 0.28s ease both;
+}
+.pru-bubble.customer {
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+.pru-bubble .who {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pru-bubble.customer .who {
+  color: var(--pru-press);
+}
+.pru-bubble .txt {
+  font-size: 13.5px;
+  margin-top: 4px;
+  line-height: 1.48;
+  color: var(--ink);
+}
+.pru-flag {
+  font-size: 11px;
+  color: var(--amber);
+  margin-top: 6px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ============ stats (serif numerals) ============ */
+.pru-stat .label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pru-stat .value {
+  font-family: var(--font-serif);
+  font-size: 34px;
+  font-weight: 500;
+  margin-top: 6px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* ============ listening signature ============ */
+.pru-listen {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.pru-listen .wave {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sage);
+  color: var(--sage);
+  animation: pru-pulse 1.9s ease-out infinite;
+}
+.pru-listen.focused .wave {
+  background: var(--amber);
+  color: var(--amber);
+  animation-duration: 1s;
+}
+.pru-listen.thinking .wave {
+  background: var(--pru);
+  color: var(--pru);
+  animation-duration: 0.8s;
+}
+@keyframes pru-pulse {
+  0% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  70% { box-shadow: 0 0 0 8px transparent; opacity: 0.85; }
+  100% { box-shadow: 0 0 0 0 transparent; opacity: 1; }
+}
+@keyframes pru-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============ motion ============ */
+.pru-enter {
+  animation: pru-fade-up 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.pru-stagger > * {
+  animation: pru-fade-up 0.52s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.pru-stagger > *:nth-child(1) { animation-delay: 0.03s; }
+.pru-stagger > *:nth-child(2) { animation-delay: 0.09s; }
+.pru-stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.pru-stagger > *:nth-child(4) { animation-delay: 0.21s; }
+.pru-stagger > *:nth-child(5) { animation-delay: 0.27s; }
+.pru-stagger > *:nth-child(6) { animation-delay: 0.33s; }
+.pru-stagger > *:nth-child(7) { animation-delay: 0.39s; }
+.pru-stagger > *:nth-child(8) { animation-delay: 0.45s; }
+@keyframes pru-fade-up {
+  from { opacity: 0; transform: translateY(11px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* breathing record light */
+.pru-rec-dot {
+  position: relative;
+  animation: pru-blink 1.8s ease-in-out infinite;
+}
+.pru-rec-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 var(--pru);
+  animation: pru-ring 1.8s ease-out infinite;
+}
+@keyframes pru-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes pru-ring {
+  0% { box-shadow: 0 0 0 0 oklch(0.55 0.22 25 / 0.4); }
+  70% { box-shadow: 0 0 0 7px oklch(0.55 0.22 25 / 0); }
+  100% { box-shadow: 0 0 0 0 oklch(0.55 0.22 25 / 0); }
+}
+
+/* shimmer skeleton */
+.pru-skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, oklch(0.94 0.004 90) 40%, var(--surface-2) 56%);
+  background-size: 300% 100%;
+  animation: pru-shimmer 1.5s ease-in-out infinite;
+  border-radius: 7px;
+}
+@keyframes pru-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -20% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============ icon chips ============ */
+.pru-ico {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.pru-ico.sm {
+  width: 30px;
+  height: 30px;
+}
+.pru-ico.red {
+  color: var(--pru);
+  border-color: var(--pru-line);
+}
+.pru-ico.sage {
+  color: var(--sage);
+  border-color: var(--sage-tint);
+}
+.pru-ico.amber {
+  color: var(--amber);
+  border-color: var(--amber-tint);
+}
+.pru-ico.blue {
+  color: var(--blue);
+  border-color: var(--blue-tint);
+}
+.pru-ico.ink {
+  color: var(--ink-2);
+  border-color: var(--line);
+}
+.pru-ico.gold {
+  color: var(--gold);
+  border-color: var(--gold-line);
+}
+
+/* hero ribbon motif (kept for compatibility; unused in the new landing) */
+.pru-ribbon {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100vw;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 17%, #000 83%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 17%, #000 83%, transparent);
+}
+.pru-ribbon svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.pru-rel {
+  position: relative;
+  z-index: 1;
+}
+.pru-card.accent {
+  position: relative;
+  overflow: hidden;
+}
+.pru-card.accent::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--pru);
+}
+
+/* dark "ink" surface — the generated site's dark moment section */
+.pru-ink {
+  background: var(--ink-surface);
+  color: var(--on-ink);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-ink);
+}
+.pru-ink .pru-muted,
+.pru-ink .pru-eyebrow {
+  color: var(--on-ink-2);
+}
+
+/* ============================================================
+   premium motion — scroll reveals + micro-interactions
+   ============================================================ */
+
+/* Keyframes are global; the reveal classes only *use* them where scroll-driven
+   timelines exist, so the baseline (no support / no JS) is fully-visible content. */
+@keyframes pru-reveal {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pru-reveal-right {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: none; }
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* Ranges live in the entry phase so every element that scrolls fully into view
+       completes its reveal — including the last section on the page (a cover-based
+       end never resolves for bottom elements, leaving them stuck half-faded). */
+    .reveal { animation: pru-reveal both linear; animation-timeline: view(); animation-range: entry 0% entry 78%; }
+    .reveal-right { animation: pru-reveal-right both linear; animation-timeline: view(); animation-range: entry 0% entry 78%; }
+    /* same-row groups cascade by nudging each child's scroll range */
+    .r-stagger > *:nth-child(1) { animation: pru-reveal both linear; animation-timeline: view(); animation-range: entry 0% entry 62%; }
+    .r-stagger > *:nth-child(2) { animation: pru-reveal both linear; animation-timeline: view(); animation-range: entry 8% entry 70%; }
+    .r-stagger > *:nth-child(3) { animation: pru-reveal both linear; animation-timeline: view(); animation-range: entry 16% entry 78%; }
+    .r-stagger > *:nth-child(4) { animation: pru-reveal both linear; animation-timeline: view(); animation-range: entry 24% entry 86%; }
+  }
+}
+
+/* hover elevation — shadow only, so it never conflicts with the reveal transforms */
+.pru-lift {
+  transition: box-shadow 0.26s ease, border-color 0.26s ease;
+}
+.pru-lift:hover {
+  box-shadow: var(--shadow-raised);
+  border-color: var(--line-strong);
+}
+
+/* hand-drawn underline under the hero emphasis, draws in on load */
+.pru-underline {
+  position: relative;
+  white-space: nowrap;
+}
+.pru-underline::after {
+  content: "";
+  position: absolute;
+  left: 0.02em;
+  right: 0.02em;
+  bottom: 0.04em;
+  height: 0.08em;
+  background: currentColor;
+  opacity: 0.42;
+  border-radius: 2px;
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: pru-draw 0.85s cubic-bezier(0.22, 0.61, 0.36, 1) 0.6s both;
+}
+@keyframes pru-draw {
+  to { transform: scaleX(1); }
+}
+
+/* button micro-interactions (buttons are not reveal targets, so transform is safe) */
+.pru-btn:hover {
+  transform: translateY(-1px);
+}
+.pru-btn-primary:hover {
+  box-shadow: 0 9px 24px oklch(0.55 0.22 25 / 0.34);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal-right,
+  .r-stagger > * {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+  }
+  .pru-underline::after {
+    animation: none;
+    transform: scaleX(1);
+  }
+  .pru-btn:hover {
+    transform: none;
+  }
+}
+
+/* ============================================================
+   THE PRIVATE CHANNEL — the signature.
+   Two planes: light paper = the shared call; this dark HUD = what only
+   the representative sees. Red means one thing everywhere: live / private / for you.
+   ============================================================ */
+.pru-hud {
+  position: relative;
+  background: var(--ink-surface);
+  color: var(--on-ink);
+  border-radius: var(--r-lg);
+  border: 1px solid oklch(1 0 0 / 0.09);
+  box-shadow: var(--shadow-ink);
+  overflow: hidden;
+}
+.pru-hud::before { /* the live private-channel signal */
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--pru), transparent 55%);
+}
+.pru-hud .hud-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid oklch(1 0 0 / 0.08);
+}
+.pru-hud .hud-live {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pru);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.pru-hud .hud-clock {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--on-ink-2);
+}
+
+/* the SHARED plane, echoed inside the HUD — what was heard on the call (muted) */
+.pru-hud .heard { padding: 17px 16px 4px; }
+.pru-hud .heard .who {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--on-ink-2);
+}
+.pru-hud .heard p {
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: oklch(0.86 0.008 260);
+  margin-top: 6px;
+}
+.pru-hud .flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.pru-hud .flag .d {
+  width: 6px;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--amber);
+}
+
+/* the PRIVATE plane — the line only the rep sees */
+.pru-hud .private {
+  margin: 13px;
+  padding: 15px;
+  border-radius: var(--r-md);
+  background: oklch(0.195 0.02 265);
+  border: 1px solid var(--pru-line);
+}
+.pru-hud .phead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pru-hud .phead .tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--pru);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pru-hud .clock {
+  position: relative;
+  display: inline-block;
+  min-width: 4.4ch;
+  height: 1.2em;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--pru);
+}
+.pru-hud .clock span {
+  position: absolute;
+  right: 0;
+  top: 0;
+  opacity: 0;
+}
+.pru-hud .clock span:last-child { opacity: 1; } /* default: the resolved +2.4s */
+
+/* the spoken advisory line — its own humanist, read-aloud voice */
+.pru-said {
+  font-family: var(--font-said);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 18px;
+  line-height: 1.5;
+  color: #fff;
+  margin: 12px 0 0;
+}
+.pru-said .w {
+  display: inline-block;
+  margin-right: 0.24em;
+}
+
+.pru-hud .chips {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.pru-hud .chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: oklch(0.82 0.06 25);
+  border: 1px solid var(--pru-line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* the one orchestrated moment: the HUD composes itself on load.
+   Base state is the FINISHED panel, so no-JS / reduced-motion shows it complete. */
+@media (prefers-reduced-motion: no-preference) {
+  .pru-hud .heard { opacity: 0; animation: pru-fade-up 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) 0.25s both; }
+  .pru-hud .flag { opacity: 0; animation: pru-fade-up 0.5s ease 1s both; }
+  .pru-hud .private { opacity: 0; animation: pru-fade-up 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) 1.35s both; }
+  .pru-said .w { opacity: 0; filter: blur(5px); transform: translateY(6px); animation: pru-word 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .pru-hud .chips .chip { opacity: 0; animation: pru-fade-up 0.45s ease both; }
+  .pru-hud .clock span { opacity: 0; }
+  .pru-hud .clock span:nth-child(1) { animation: pru-tick 3.6s both 0.4s; }
+  .pru-hud .clock span:nth-child(2) { animation: pru-tick 3.6s both 1s; }
+  .pru-hud .clock span:nth-child(3) { animation: pru-hold 3.6s both 1.7s; }
+}
+@keyframes pru-word { to { opacity: 1; filter: blur(0); transform: none; } }
+@keyframes pru-tick { 0% { opacity: 0; } 8% { opacity: 1; } 38% { opacity: 1; } 48% { opacity: 0; } 100% { opacity: 0; } }
+@keyframes pru-hold { 0% { opacity: 0; } 22% { opacity: 1; } 100% { opacity: 1; } }
+
+/* ============ the moment — how it works, told as timing ============ */
+.pru-timeline {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  margin-top: 46px;
+}
+.pru-timeline::before { /* the rail time runs along */
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 12%;
+  top: 47px;
+  height: 1px;
+  background: var(--line-strong);
+}
+.pru-tl-node { padding-right: 30px; }
+.pru-tl-node .t {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.pru-tl-node .dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 2px solid var(--sage);
+  margin: 24px 0 20px;
+  position: relative;
+  z-index: 1;
+}
+.pru-tl-node.signal .dot { border-color: var(--amber); }
+.pru-tl-node.private .dot {
+  border-color: var(--pru);
+  background: var(--pru);
+  box-shadow: 0 0 0 5px var(--pru-tint);
+}
+.pru-tl-node h3 { font-size: 21px; margin-bottom: 9px; letter-spacing: -0.01em; }
+.pru-tl-node p { color: var(--ink-3); font-size: 14px; line-height: 1.55; max-width: 31ch; }
+.pru-tl-node .said-mini {
+  font-family: var(--font-said);
+  font-style: italic;
+  color: var(--ink-2);
+}
+
+/* ============ trust — quiet, typographic, hairline-divided ============ */
+.pru-trust {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 40px;
+  border-top: 1px solid var(--line);
+}
+.pru-trust > div {
+  padding: 26px 30px 8px 26px;
+  border-left: 1px solid var(--line);
+}
+.pru-trust > div:first-child { border-left: none; padding-left: 0; }
+.pru-trust .ico { color: var(--pru); margin-bottom: 15px; }
+.pru-trust h3 { font-size: 18px; margin-bottom: 8px; }
+.pru-trust p { color: var(--ink-3); font-size: 13.5px; line-height: 1.6; }
+
+/* ============ closing CTA — step into the private channel ============ */
+.pru-cta {
+  position: relative;
+  overflow: hidden;
+  background: var(--ink-surface);
+  color: var(--on-ink);
+  border-radius: var(--r-xl);
+  padding: 64px 40px;
+  text-align: center;
+  box-shadow: var(--shadow-ink);
+}
+.pru-cta::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--pru), transparent);
+}
+.pru-cta h2 { color: #fff; }
+.pru-cta p { color: var(--on-ink-2); }
