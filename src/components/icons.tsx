@@ -105,6 +105,13 @@ export function IconCheck({ size }: P) {
     </svg>
   );
 }
+export function IconX({ size }: P) {
+  return (
+    <svg {...base(size)}>
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
 export function IconArrow({ size }: P) {
   return (
     <svg {...base(size)}>

@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { SummaryData } from "@/lib/console-types";
-import { IconShield } from "../icons";
 
 export default function SummaryStep({
   summary,
@@ -55,93 +54,86 @@ export default function SummaryStep({
   };
 
   return (
-    <div className="pru-container" style={{ maxWidth: 1080 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+    <div className="pru-container" style={{ maxWidth: 900 }}>
+      <div className="brief-head">
         <div>
-          <span className="pru-eyebrow pill green" style={{ background: "var(--sage-tint)", color: "var(--green)" }}>● Session ended</span>
-          <h1 style={{ fontSize: 36, margin: "12px 0 4px" }}>Advisor session summary</h1>
-          <div className="pru-muted" style={{ fontSize: 13.5 }}>
-            {productArea} · {summary.durationMin} min · {summary.concerns.length} customer concern{summary.concerns.length === 1 ? "" : "s"} captured
-          </div>
+          <h1 className="doc-title">Advisor brief</h1>
+          <div className="doc-sub" style={{ marginBottom: 0 }}>{productArea}</div>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button className="pru-btn" onClick={startNew}>Start New Session</button>
-          <button className="pru-btn pru-btn-primary" onClick={exportBrief}>↓ Export Advisor Brief</button>
+        <div className="meta">
+          {summary.durationMin} MIN
+          <br />
+          SESSION ENDED
         </div>
       </div>
 
-      <div className="pru-grid-2 pru-stagger" style={{ marginTop: 20 }}>
-        <ListCard title="Key customer concerns" items={summary.concerns} dot="var(--amber)" />
-        <ListCard title="Talking points suggested" items={summary.talkingPoints} dot="var(--pru-red)" />
-      </div>
-      <div className="pru-grid-2 pru-stagger" style={{ marginTop: 18 }}>
-        <ListCard title="Follow-up items" items={summary.followUps} dot="var(--green)" />
-        <div className="pru-card">
-          <span className="pru-eyebrow pill">Representative notes</span>
-          <p className="pru-muted" style={{ fontSize: 13.5, margin: "12px 0", lineHeight: 1.5 }}>{summary.notes || "No automated notes captured."}</p>
-          <label htmlFor="rep-notes" className="pru-eyebrow" style={{ display: "block", marginBottom: 7 }}>Your notes</label>
-          <textarea id="rep-notes" name="notes" className="pru-input" rows={4} placeholder="Add additional notes…" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ resize: "vertical" }} />
-        </div>
+      {/* The numbers sit inside a sentence rather than in metric cards, because this is the
+          form the rep repeats to a supervisor. */}
+      <p className="stat-sentence">
+        Over <b>{summary.durationMin}</b> minutes PRUAssist flagged <b>{s.flags}</b>{" "}
+        {s.flags === 1 ? "moment" : "moments"} of confusion and surfaced <b>{s.surfaced}</b>{" "}
+        {s.surfaced === 1 ? "pointer" : "pointers"}. You used <b>{s.used}</b>, drawing on <b>{s.docs}</b>{" "}
+        {s.docs === 1 ? "document" : "documents"}.
+      </p>
+
+      <Section title="What the customer raised" items={summary.concerns} />
+      <Section title="Lines suggested to you" items={summary.talkingPoints} said />
+      <Section title="Still open" items={summary.followUps} />
+
+      <div className="sec">
+        <div className="sec-h">Notes</div>
+        <p className="pru-muted" style={{ fontSize: 13.5, lineHeight: 1.65, marginBottom: 14 }}>
+          {summary.notes || "No automated notes captured."}
+        </p>
+        <label htmlFor="rep-notes" className="pru-eyebrow" style={{ display: "block", marginBottom: 7 }}>
+          Your notes
+        </label>
+        <textarea
+          id="rep-notes"
+          name="notes"
+          className="pru-input"
+          rows={4}
+          placeholder="Add anything you want in the exported brief…"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          style={{ resize: "vertical" }}
+        />
       </div>
 
-      <div className="pru-card pru-stagger pru-stats" style={{ marginTop: 18 }}>
-        <Stat label="Pointers surfaced" value={s.surfaced} />
-        <Stat label="Pointers used" value={s.used} />
-        <Stat label="Confusion flags" value={s.flags} />
-        <Stat label="Documents referenced" value={s.docs} />
-      </div>
+      <p className="notice" style={{ marginTop: 8 }}>
+        PRUAssist did not make any product recommendations. All talking points were suggestions for the Financial
+        Representative, who remains fully responsible for the advice given.
+      </p>
 
-      <div className="pru-card" style={{ marginTop: 18, background: "var(--pru-red-soft)", borderColor: "var(--pru-red-line)", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-        <span style={{ color: "var(--pru)", flexShrink: 0 }}><IconShield size={15} /></span>
-        <span className="pru-muted" style={{ fontSize: 12.5, maxWidth: 660 }}>
-          PRUAssist did not make any product recommendations. All talking points were suggestions for the Financial
-          Representative, who remains fully responsible for the advice given.
-        </span>
+      <div className="actions-row">
+        <button className="pru-btn pru-btn-primary" onClick={exportBrief}>
+          Export brief
+        </button>
+        <button className="pru-btn" onClick={startNew}>
+          Start new session
+        </button>
+        <span className="hint">The transcript is discarded when you leave this page</span>
       </div>
     </div>
   );
 }
 
-function ListCard({ title, items, dot }: { title: string; items: string[]; dot: string }) {
+function Section({ title, items, said }: { title: string; items: string[]; said?: boolean }) {
   return (
-    <div className="pru-card">
-      <span className="pru-eyebrow pill">{title}</span>
-      <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-        {(items.length ? items : ["No items captured for this session."]).map((it, i) => (
-          <div key={i} style={{ display: "flex", gap: 10, fontSize: 13.5, lineHeight: 1.45 }}>
-            <span style={{ color: dot, marginTop: 5, fontSize: 9 }}>●</span>
-            <span>{it}</span>
+    <div className="sec">
+      <div className="sec-h">{title}</div>
+      {items.length === 0 ? (
+        <p className="pru-muted" style={{ fontSize: 13 }}>
+          Nothing captured for this session.
+        </p>
+      ) : (
+        items.map((it, i) => (
+          <div key={i} className="qa">
+            {/* Suggested lines are set in the spoken voice; everything else is UI text. */}
+            <div className={said ? "q" : "a"}>{said ? `“${it}”` : it}</div>
           </div>
-        ))}
-      </div>
+        ))
+      )}
     </div>
   );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="pru-stat">
-      <div className="label">{label}</div>
-      <div className="value">
-        <CountUp value={value} />
-      </div>
-    </div>
-  );
-}
-
-function CountUp({ value }: { value: number }) {
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    let raf = 0;
-    const start = performance.now();
-    const dur = 750;
-    const tick = (t: number) => {
-      const p = Math.min(1, (t - start) / dur);
-      setN(Math.round(value * (1 - Math.pow(1 - p, 3))));
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [value]);
-  return <>{n}</>;
 }

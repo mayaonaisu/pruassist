@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconShield } from "@/components/icons";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,21 +36,16 @@ export default function LoginPage() {
   return (
     <main style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: "24px 16px" }}>
       <div className="pru-enter" style={{ width: "min(400px, 100%)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 11, justifyContent: "center", marginBottom: 22 }}>
-          <div className="pru-logo">
-            <div className="mark">P</div>
-            <div>
-              <div className="name">PRUAssist</div>
-              <div className="sub">Advisor Co-Pilot</div>
-            </div>
-          </div>
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
+          <span className="pru-logo" style={{ fontSize: 20 }}>
+            PRU<i>Assist</i>
+          </span>
         </div>
 
         <form onSubmit={onSubmit} className="pru-card" style={{ padding: 26 }}>
-          <span className="pru-ico red" style={{ marginBottom: 16 }}><IconShield size={20} /></span>
-          <span className="pru-eyebrow pill" style={{ display: "inline-block" }}>● Internal · licensed representatives</span>
-          <h1 style={{ fontSize: 24, fontWeight: 750, margin: "14px 0 4px" }}>Sign in to your co-pilot</h1>
-          <p className="pru-muted" style={{ fontSize: 13.5, marginBottom: 20 }}>
+          <div className="pru-eyebrow">Internal · licensed representatives</div>
+          <h1 className="doc-title" style={{ fontSize: 21, margin: "10px 0 4px" }}>Sign in</h1>
+          <p className="doc-sub" style={{ marginBottom: 20 }}>
             PRUAssist is private to the representative — it never speaks to the customer.
           </p>
 
@@ -64,7 +58,7 @@ export default function LoginPage() {
           {error && <p role="alert" style={{ color: "var(--pru)", fontSize: 13, marginTop: 13, fontWeight: 600 }}>{error}</p>}
 
           <button className="pru-btn pru-btn-primary" disabled={loading} style={{ width: "100%", marginTop: 18, padding: "11px" }}>
-            {loading ? "Signing in…" : "Sign in →"}
+            {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
 

@@ -1,22 +1,12 @@
 "use client";
 
-import { IconArrow, IconLayers, IconLock, IconLogout, IconShield, IconSparkle } from "../icons";
-import { KNOWLEDGE } from "@/lib/knowledge";
-
-const CLAUSES = KNOWLEDGE.length;
-
-// Post-login readiness — real status, not a product pitch.
-const READY = [
-  { icon: <IconLayers size={16} />, label: "Knowledge base", value: `${CLAUSES} policy clauses`, sub: "PRUShield + PRUExtra · brochure-cited" },
-  { icon: <IconSparkle size={16} />, label: "Talking points", value: "AI ready", sub: "Grounded · every line sourced" },
-  { icon: <IconLock size={16} />, label: "Privacy", value: "Private to you", sub: "Customer consents on their link" },
-  { icon: <IconShield size={16} />, label: "Your control", value: "Suggests only", sub: "Use, rephrase, or ignore" },
-];
+import { IconArrow, IconLogout } from "../icons";
+import DocumentsInScope from "../DocumentsInScope";
 
 const NEXT = [
-  { n: "1", title: "Consent & context", body: "Confirm consent, choose the meeting focus, and send the customer a private link to join." },
-  { n: "2", title: "Live session", body: "Speak normally on video. Private talking points appear on your side only, in real time." },
-  { n: "3", title: "Summary & follow-ups", body: "Get an automatic recap — concerns raised, points covered, and suggested next steps." },
+  { n: "01", title: "Consent & context", body: "Confirm consent, set the meeting focus, and send the customer a private link." },
+  { n: "02", title: "Live session", body: "Speak normally. Private pointers appear on your side only, as the conversation runs." },
+  { n: "03", title: "Advisor brief", body: "A written record of what they asked, what you answered, and what is still open." },
 ];
 
 export default function IntroStep({ repName, onStart }: { repName: string; onStart: () => void }) {
@@ -32,63 +22,39 @@ export default function IntroStep({ repName, onStart }: { repName: string; onSta
   }
 
   return (
-    <div className="pru-container" style={{ maxWidth: 1040 }}>
-      {/* launchpad header */}
-      <div style={{ padding: "20px 0 4px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <span className="pru-eyebrow pill" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <IconLock size={12} /> Internal tool{name ? ` · signed in as ${name}` : ""}
-          </span>
-          <button className="pru-btn pru-btn-sm" onClick={logout} title="Sign out of PRUAssist">
-            <IconLogout size={15} /> Log out
-          </button>
+    <div className="pru-container" style={{ maxWidth: 900 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 22 }}>
+        <div>
+          <h1 className="doc-title">Ready when you are</h1>
+          <div className="doc-sub" style={{ marginBottom: 0 }}>
+            {name ? `Signed in as ${name}` : "Signed in"} · nothing is recorded until both parties consent
+          </div>
         </div>
-        <h1 style={{ fontSize: 46, margin: "18px 0 12px", maxWidth: 640 }}>Ready when you are.</h1>
-        <p className="pru-muted" style={{ maxWidth: 560, lineHeight: 1.62, fontSize: 15.5 }}>
-          Start an advisory session and PRUAssist works quietly in the background — transcribing with consent, spotting
-          confusion, and handing you private, policy-grounded lines. You stay in control of every word.
-        </p>
-        <div style={{ marginTop: 26 }}>
-          <button className="pru-btn pru-btn-primary" onClick={onStart} style={{ padding: "12px 22px" }}>
-            Start advisory session <IconArrow size={16} />
-          </button>
-        </div>
+        <button className="pru-btn pru-btn-sm" onClick={logout} style={{ marginLeft: "auto" }} title="Sign out of PRUAssist">
+          <IconLogout size={14} /> Log out
+        </button>
       </div>
 
-      {/* co-pilot readiness — real, reassuring pre-flight */}
-      <div className="pru-card" style={{ marginTop: 26 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
-          <span className="pru-eyebrow">Co-pilot readiness</span>
-          <span className="pru-eyebrow pill green" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 6, height: 6, borderRadius: 6, background: "var(--sage)", display: "inline-block" }} /> All systems ready
-          </span>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20 }}>
-          {READY.map((r) => (
-            <div key={r.label}>
-              <span className="pru-ico sm sage">{r.icon}</span>
-              <div className="pru-eyebrow" style={{ marginTop: 13 }}>{r.label}</div>
-              <div style={{ fontWeight: 700, fontSize: 15, margin: "5px 0 3px", letterSpacing: "-0.01em" }}>{r.value}</div>
-              <div className="pru-muted" style={{ fontSize: 12.5, lineHeight: 1.45 }}>{r.sub}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+      <DocumentsInScope title="Documents indexed for this session" />
 
-      {/* what happens after you start — the procedure, not a pitch */}
-      <div style={{ marginTop: 24 }}>
-        <span className="pru-eyebrow" style={{ marginLeft: 2 }}>What happens after you start</span>
-        <div className="pru-grid-3" style={{ marginTop: 12 }}>
+      <div className="sec" style={{ marginTop: 26 }}>
+        <div className="sec-h">What happens after you start</div>
+        <div className="pru-grid-3">
           {NEXT.map((s) => (
-            <div key={s.n} className="pru-card pru-lift">
-              <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                <span style={{ width: 27, height: 27, borderRadius: 999, background: "var(--pru)", color: "#fff", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 700, fontFamily: "var(--font-mono)", flexShrink: 0 }}>{s.n}</span>
-                <div style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: "-0.01em" }}>{s.title}</div>
-              </div>
-              <p className="pru-muted" style={{ fontSize: 13.5, lineHeight: 1.55, marginTop: 13 }}>{s.body}</p>
+            <div key={s.n}>
+              <div className="pru-eyebrow" style={{ color: "var(--pru)" }}>{s.n}</div>
+              <div style={{ fontWeight: 500, fontSize: 14.5, margin: "7px 0 5px" }}>{s.title}</div>
+              <p className="pru-muted" style={{ fontSize: 12.5, lineHeight: 1.55 }}>{s.body}</p>
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="actions-row">
+        <button className="pru-btn pru-btn-primary" onClick={onStart}>
+          Start advisory session <IconArrow size={15} />
+        </button>
+        <span className="hint">You send the customer a link on the next screen</span>
       </div>
     </div>
   );

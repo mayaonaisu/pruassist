@@ -18,6 +18,23 @@ export function knowledgeDocuments(): string[] {
   return [...new Set(KNOWLEDGE.map((c) => c.source.split(" · ")[0]))];
 }
 
+// What the UI shows as "documents in scope": one row per document, with the clause count and
+// page span the retriever can actually cite from. Derived from the clauses themselves, so the
+// screen can never advertise coverage the knowledge base doesn't have.
+export type DocumentIndex = { doc: string; clauses: number; pages: string };
+
+export function knowledgeIndex(): DocumentIndex[] {
+  return knowledgeDocuments().map((doc) => {
+    const clauses = KNOWLEDGE.filter((c) => c.source.startsWith(doc));
+    const pages = clauses.flatMap((c) => [...c.source.matchAll(/p\.(\d+)/g)].map((m) => Number(m[1])));
+    return {
+      doc,
+      clauses: clauses.length,
+      pages: pages.length ? `pp. ${Math.min(...pages)}–${Math.max(...pages)}` : "—",
+    };
+  });
+}
+
 export const KNOWLEDGE: Clause[] = [
   {
     id: "what-is-prushield",

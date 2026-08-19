@@ -2,7 +2,7 @@
 
 export default function Error({ reset }: { error: Error; reset: () => void }) {
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)", display: "grid", placeItems: "center", padding: 28 }}>
+    <div style={{ minHeight: "100dvh", background: "var(--brochure)", display: "grid", placeItems: "center", padding: 28 }}>
       <div className="pru-card" style={{ width: "min(480px, 94vw)", textAlign: "center" }}>
         <h1 style={{ fontSize: 22, marginBottom: 8 }}>Something went wrong</h1>
         <p className="pru-muted" style={{ fontSize: 14, lineHeight: 1.6 }}>

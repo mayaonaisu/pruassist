@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LiveKitRoom,
-  GridLayout,
   ParticipantTile,
   RoomAudioRenderer,
   useRoomContext,
@@ -13,9 +12,7 @@ import { RoomEvent, Track } from "livekit-client";
 import "@livekit/components-styles";
 import { useBrowserSpeech } from "@/lib/useBrowserSpeech";
 import { useLocalMedia, type DeviceStatus } from "@/lib/useLocalMedia";
-import { knowledgeDocuments } from "@/lib/knowledge";
 import type { SessionInfo, Stats } from "@/lib/console-types";
-import { IconLayers, IconSparkle, IconWave } from "../icons";
 
 type Line = { id: string; speaker: string; text: string; flag?: boolean };
 type Src = { source: string; snippet: string };
@@ -66,9 +63,9 @@ export default function LiveStep({
     };
   }, [session.roomId, repName]);
 
-  if (!serverUrl) return <div className="pru-card">NEXT_PUBLIC_LIVEKIT_URL is not set in .env.local.</div>;
-  if (error) return <div className="pru-card" style={{ color: "var(--pru-red)" }}>{error}</div>;
-  if (!token) return <div className="pru-card">Connecting to the secure room…</div>;
+  if (!serverUrl) return <div className="notice bad">NEXT_PUBLIC_LIVEKIT_URL is not set in .env.local.</div>;
+  if (error) return <div className="notice bad">{error}</div>;
+  if (!token) return <div className="notice">Connecting to the secure room…</div>;
 
   return (
     <LiveKitRoom token={token} serverUrl={serverUrl} connect audio video>
@@ -78,20 +75,67 @@ export default function LiveStep({
   );
 }
 
-function VideoStrip() {
+/* The two faces, in one short row. Remote participants come first — the rep is looking at the
+   customer, not at themselves — and the rep's own tile carries the device controls. */
+function Faces({ media }: { media: ReturnType<typeof useLocalMedia> }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+  const local = tracks.find((t) => t.participant.isLocal);
+  const remotes = tracks.filter((t) => !t.participant.isLocal);
+
   return (
-    <div data-lk-theme="default" style={{ height: "100%", borderRadius: 12, overflow: "hidden", border: "1px solid var(--line)" }}>
-      <GridLayout tracks={tracks}>
-        <ParticipantTile />
-      </GridLayout>
+    <div className="cams" data-lk-theme="default">
+      {remotes.length === 0 ? (
+        <div className="cam">
+          <div className="cam-face">waiting for the customer…</div>
+          <span className="cam-tag">CUSTOMER</span>
+        </div>
+      ) : (
+        remotes.map((t) => (
+          <div className="cam" key={t.participant.sid}>
+            <ParticipantTile trackRef={t} />
+            <span className="cam-tag">CUSTOMER</span>
+            <span className="cam-nm">
+              <span className="sp" />
+              {t.participant.name || t.participant.identity}
+            </span>
+          </div>
+        ))
+      )}
+
+      <div className="cam me">
+        {local ? <ParticipantTile trackRef={local} /> : <div className="cam-face">camera off</div>}
+        <span className="cam-tag">YOU</span>
+        {/* A failed camera must not read as a camera the rep chose to turn off — that was the
+            whole point of surfacing device failures, so it gets its own label and colour. */}
+        {isBroken(media.cam) && <span className="cam-bad">{CAM_LABEL[media.cam].text.toUpperCase()}</span>}
+        <span className="cam-ctl">
+          <button
+            type="button"
+            className={deviceClass(media.mic)}
+            onClick={media.toggleMic}
+            title={MIC_LABEL[media.mic].hint}
+            aria-label={MIC_LABEL[media.mic].hint}
+          >
+            <IconMic off={media.mic !== "on"} />
+          </button>
+          <button
+            type="button"
+            className={deviceClass(media.cam)}
+            onClick={media.toggleCam}
+            title={CAM_LABEL[media.cam].hint}
+            aria-label={CAM_LABEL[media.cam].hint}
+          >
+            <IconCam off={media.cam !== "on"} />
+          </button>
+        </span>
+      </div>
     </div>
   );
 }
 
 function IconMic({ off }: { off?: boolean }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="9" y="2" width="6" height="11" rx="3" />
       <path d="M5 10a7 7 0 0 0 14 0" />
       <path d="M12 17v4" />
@@ -101,12 +145,28 @@ function IconMic({ off }: { off?: boolean }) {
 }
 function IconCam({ off }: { off?: boolean }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="6" width="13" height="12" rx="2" />
       <path d="m15 10 6-3.5v11L15 14" />
       {off && <line x1="2" y1="2" x2="22" y2="22" />}
     </svg>
   );
+}
+
+const isBroken = (s: DeviceStatus) => s === "missing" || s === "blocked";
+const deviceClass = (s: DeviceStatus) => (isBroken(s) ? "bad" : s === "off" ? "off" : "");
+
+const BUCKETS = 16;
+
+// Isolated so the ticking clock re-renders a <span>, not the whole console every second.
+function Elapsed({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(startedAt);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const s = Math.max(0, Math.floor((now - startedAt) / 1000));
+  return <>{`${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`}</>;
 }
 
 function LiveConsole({
@@ -124,11 +184,12 @@ function LiveConsole({
   const [consent, setConsent] = useState<{ name: string; consentedAt: string } | null>(null);
   const [result, setResult] = useState<Pointers | null>(null);
   const [note, setNote] = useState<string>();
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [used, setUsed] = useState<Set<string>>(new Set());
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [auto, setAuto] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [startedAt, setStartedAt] = useState(0);
 
   const idRef = useRef(0);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -142,6 +203,7 @@ function LiveConsole({
 
   useEffect(() => {
     startRef.current = Date.now();
+    setStartedAt(startRef.current);
   }, []);
 
   const addFinal = useCallback((speaker: string, text: string, flag = false) => {
@@ -243,11 +305,12 @@ function LiveConsole({
           sources: Array.isArray(data.sources) ? data.sources : [],
         };
         setResult(r);
-        setDismissed(new Set());
         setUsed(new Set());
+        setOpenKey(null);
         if (!rephrase) {
-          const fields = [r.concern, r.firstStep, r.suggestedLine, r.explainer, r.comparison, r.followUp].filter(Boolean).length;
-          statsRef.current.surfaced += fields;
+          // One pointer = one line offered. Counting the six fields separately made the brief
+          // read "surfaced 24, used 3", because only the line itself can be marked as said.
+          if (r.suggestedLine) statsRef.current.surfaced += 1;
           if (r.concern) statsRef.current.flags += 1;
         }
         r.sources.forEach((s) => docsRef.current.add(s.source));
@@ -293,254 +356,215 @@ function LiveConsole({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  type PointerCard = { key: string; cat: string; cls: string; title: string; text: string; quote?: boolean };
-  const allCards: PointerCard[] = result
-    ? [
-        { key: "concern", cat: "Detected concern", cls: "cat-concern", title: "What the customer is unsure about", text: result.concern },
-        { key: "firstStep", cat: "What to do first", cls: "cat-do", title: "Confirm understanding first", text: result.firstStep },
-        { key: "line", cat: "Suggested line", cls: "cat-line", title: "A line you could open with", text: result.suggestedLine, quote: true },
-        { key: "explainer", cat: "Explanation you can use", cls: "cat-explain", title: "Plain-language explainer", text: result.explainer },
-        { key: "comparison", cat: "Comparison pointer", cls: "cat-compare", title: "Frame the trade-off", text: result.comparison },
-        { key: "followUp", cat: "Follow-up prompt", cls: "cat-follow", title: "Surface their priority", text: result.followUp, quote: true },
-      ]
-    : [];
-  const cards = allCards.filter((c) => c.text && !dismissed.has(c.key));
+  // The confusion timeline is derived from the flags already on the transcript — it never
+  // invents a signal the transcript doesn't carry.
+  const { bars, flagCount } = useMemo(() => {
+    const out = new Array(BUCKETS).fill(0) as number[];
+    let flags = 0;
+    lines.forEach((l, i) => {
+      if (!l.flag) return;
+      flags += 1;
+      out[Math.min(BUCKETS - 1, Math.floor((i / Math.max(1, lines.length)) * BUCKETS))] += 1;
+    });
+    return { bars: out, flagCount: flags };
+  }, [lines]);
 
   // While the rep is muted, drop their half-captured phrase so no stale "live" text lingers.
   const visibleInterim = micEnabled ? interim : { ...interim, [repName]: "" };
 
+  // The camera can fail the same two ways the mic can, and the rep needs telling either way —
+  // the tile badge is easy to miss while they're looking at the customer.
+  const camAlert = isBroken(media.cam) ? `${CAM_LABEL[media.cam].hint} The call and your audio are unaffected.` : null;
+
   const micAlert =
     media.mic === "missing"
-      ? "No microphone detected. Your audio isn’t being shared and your speech won’t be transcribed. Enable a mic in your OS sound settings, then click “No microphone” to retry. The camera and the customer’s audio are unaffected."
+      ? "No microphone detected. Your speech won’t be transcribed. Enable a mic in your OS sound settings, then click the mic button to retry."
       : media.mic === "blocked"
-        ? "Your browser is blocking microphone access. Your speech won’t be transcribed. Allow the microphone for this site (click the padlock in the address bar), then reload — the warning clears itself once access is granted."
+        ? "Your browser is blocking microphone access, so your speech won’t be transcribed. Allow the microphone for this site (padlock in the address bar), then reload."
         : speech === "unsupported"
-          ? "Live transcription needs Chrome or Edge. The call itself works normally in this browser, but your speech won’t appear in the transcript."
+          ? "Live transcription needs Chrome or Edge. The call works normally here, but your speech won’t appear in the transcript."
           : speech === "denied"
-            ? "Speech recognition was blocked by the browser, so your side of the conversation won’t be transcribed. Allow microphone access for this site and reload."
+            ? "Speech recognition was blocked by the browser, so your side of the conversation won’t be transcribed. Allow microphone access and reload."
             : null;
 
-  const colStyle: React.CSSProperties = { height: "100%", minHeight: 0, display: "flex", flexDirection: "column", padding: 0 };
+  // Supporting material — everything that is not the line itself, collapsed to one row each.
+  const support = result
+    ? ([
+        { key: "firstStep", label: "Do first", text: result.firstStep },
+        { key: "explainer", label: "Explainer", text: result.explainer },
+        { key: "comparison", label: "Compare", text: result.comparison },
+        { key: "followUp", label: "Ask next", text: result.followUp },
+      ] as const).filter((r) => r.text)
+    : [];
 
   return (
-    <div className="pru-live" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* control bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, flexWrap: "wrap", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <span style={{ color: "var(--pru-red)", fontWeight: 700, display: "flex", alignItems: "center", gap: 7 }}>
-            <span className="pru-rec-dot" style={{ width: 9, height: 9, borderRadius: 9, background: "var(--pru-red)", display: "inline-block" }} />
-            Recording Started
-          </span>
-          <span className="pru-eyebrow">Session</span>
-          <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{session.roomId}</span>
-          <span style={{ width: 1, height: 18, background: "var(--line)", display: "inline-block" }} />
-          <button
-            type="button"
-            className="pru-btn pru-btn-sm"
-            onClick={media.toggleMic}
-            title={MIC_LABEL[media.mic].hint}
-            style={deviceBtnStyle(media.mic)}
-          >
-            <IconMic off={media.mic !== "on"} />
-            {MIC_LABEL[media.mic].text}
+    <div className="pru-live">
+      <div className="c-rail">
+        <span className="rec">
+          <span className="pru-rec-dot" />
+          REC
+        </span>
+        <span className="c-t">{startedAt ? <Elapsed startedAt={startedAt} /> : "00:00"}</span>
+        <span className="c-ctx">
+          {session.productArea} · <b>{consent ? consent.name : "awaiting customer"}</b>
+        </span>
+        <span className="c-r">
+          <button className="pru-btn pru-btn-sm" onClick={copy}>
+            {copied ? "✓ Link copied" : "Copy customer link"}
           </button>
           <button
-            type="button"
-            className="pru-btn pru-btn-sm"
-            onClick={media.toggleCam}
-            title={CAM_LABEL[media.cam].hint}
-            style={deviceBtnStyle(media.cam)}
+            className={`pru-chip ${auto ? "on" : ""}`}
+            style={{ padding: "6px 11px", fontSize: 12 }}
+            aria-pressed={auto}
+            onClick={() => setAuto((a) => !a)}
           >
-            <IconCam off={media.cam !== "on"} />
-            {CAM_LABEL[media.cam].text}
+            {auto ? "Auto-suggest on" : "Auto-suggest off"}
           </button>
-        </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button className="pru-btn pru-btn-sm" onClick={copy}>{copied ? "✓ Link copied" : "⧉ Copy customer link"}</button>
-          <button className={`pru-chip ${auto ? "on" : ""}`} style={{ padding: "6px 11px", fontSize: 12 }} onClick={() => setAuto((a) => !a)}>
-            {auto ? "● Auto-suggest on" : "○ Auto-suggest off"}
+          <button className="btn-end" onClick={end}>
+            End session
           </button>
-          <button className="pru-btn pru-btn-primary pru-btn-sm" onClick={end}>End Session</button>
-        </div>
+        </span>
       </div>
 
-      {micAlert && (
-        <div role="status" style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 10, padding: "9px 13px", borderRadius: 10, background: "var(--amber-tint)", border: "1px solid rgba(178,107,18,0.28)", color: "var(--amber)", fontSize: 12.5 }}>
-          <IconMic off />
-          <span>{micAlert}</span>
+      {(micAlert || camAlert) && (
+        <div role="status" className="notice" style={{ flex: "none" }}>
+          {[micAlert, camAlert].filter(Boolean).join(" ")}
         </div>
       )}
 
-      <div style={{ flex: "2 1 0", minHeight: 200 }}>
-        <VideoStrip />
+      <div className="c-top">
+        <Faces media={media} />
+        <div className="c-meta">
+          <div className="strip-h">Where they lost the thread</div>
+          <div className="bars">
+            {bars.map((n, i) => (
+              <span
+                key={i}
+                className={n >= 2 ? "hi" : n === 1 ? "mid" : ""}
+                style={{ height: `${Math.min(92, 16 + n * 34)}%` }}
+              />
+            ))}
+          </div>
+          <div className="strip-legend">
+            <span>00:00</span>
+            <span>
+              <b>
+                {flagCount} {flagCount === 1 ? "flag" : "flags"}
+              </b>
+            </span>
+            <span>now</span>
+          </div>
+        </div>
       </div>
 
-      <div className="pru-grid-3" style={{ flex: "1.15 1 0", minHeight: 200, alignItems: "stretch" }}>
-        {/* Column 1 — transcript */}
-        <div className="pru-card" style={colStyle}>
-          <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="pru-ico sm ink"><IconWave size={15} /></span>
-            <div>
-              <div style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
-                Live Transcript
-                {media.mic === "off" && (
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.03em", textTransform: "uppercase", color: "var(--amber)", background: "var(--amber-tint)", padding: "2px 7px", borderRadius: 999 }}>
-                    Paused · muted
-                  </span>
+      {/* THE LINE — the one thing the rep reads while looking at a customer. */}
+      <div className="line-block">
+        {loading && !result ? (
+          <>
+            <div className="pru-skeleton" style={{ height: 12, width: "30%", marginBottom: 12 }} />
+            <div className="pru-skeleton" style={{ height: 22, width: "92%", marginBottom: 8 }} />
+            <div className="pru-skeleton" style={{ height: 22, width: "64%" }} />
+          </>
+        ) : !result ? (
+          <>
+            <div className="lb-head">
+              <span className="cat">Listening</span>
+            </div>
+            <div className="concern">
+              {note ??
+                "When the customer asks something, the line to say appears here — grounded in the policy documents, with the page it came from."}
+            </div>
+          </>
+        ) : (
+          <div className="pru-enter">
+            <div className="lb-head">
+              <span className="cat">Detected confusion</span>
+              <span className="conf">{result.sources.length} cited</span>
+            </div>
+            {result.concern && <div className="concern">{result.concern}</div>}
+            <div className="say-wrap">
+              <div className="say">
+                <span className="q">“</span>
+                {result.suggestedLine}
+                <span className="q">”</span>
+              </div>
+              <div className="cite">
+                <b>Grounded in</b>
+                {result.sources.length ? (
+                  result.sources.map((s, i) => <span key={i}>{s.source}</span>)
+                ) : (
+                  <span>no source returned</span>
                 )}
               </div>
-              <div className="pru-muted" style={{ fontSize: 12 }}>Consent-based · {consent ? `customer consented ${new Date(consent.consentedAt).toLocaleTimeString()}` : "awaiting customer consent"}</div>
+            </div>
+            <div className="say-actions">
+              <button className="said" onClick={() => markUsed("line")} disabled={used.has("line")}>
+                {used.has("line") ? "✓ Said it" : "Said it"}
+              </button>
+              <button className="ghost" onClick={() => runSuggest({ rephrase: true })} disabled={loading}>
+                Say it simpler
+              </button>
+              <button className="ghost" onClick={() => setResult(null)}>
+                Not now
+              </button>
             </div>
           </div>
-          <div ref={feedRef} className="pru-scroll" style={{ flex: 1, padding: 14 }}>
-            {lines.length === 0 && Object.values(visibleInterim).every((v) => !v) && (
-              <div className="pru-muted" style={{ fontSize: 13 }}>Transcript appears here as you and the customer speak. (Chrome / Edge.)</div>
+        )}
+      </div>
+
+      <div className="c-bot">
+        <div className="pane sup">
+          <div className="deck-h">If you need more</div>
+          <div className="sup-body pru-scroll">
+            {support.length === 0 ? (
+              <p className="pru-muted" style={{ fontSize: 12 }}>
+                Supporting material appears with the next pointer.
+              </p>
+            ) : (
+              support.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  className={`sup-row ${openKey === r.key ? "open" : ""}`}
+                  aria-expanded={openKey === r.key}
+                  onClick={() => setOpenKey((k) => (k === r.key ? null : r.key))}
+                >
+                  <span className="k">{r.label}</span>
+                  <span className="v">{r.text}</span>
+                  <span className="x">{openKey === r.key ? "−" : "+"}</span>
+                </button>
+              ))
             )}
-            {lines.map((l) => {
-              const isRep = l.speaker === repName;
-              return (
-                <div key={l.id} className={`pru-bubble ${isRep ? "" : "customer"}`}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span className="who">{isRep ? "Representative" : l.speaker}</span>
-                  </div>
-                  <div className="txt">{l.text}</div>
-                  {l.flag && <div className="pru-flag">● Confusion / question detected</div>}
-                </div>
-              );
-            })}
+          </div>
+        </div>
+
+        <div className="pane tr">
+          <div className="deck-h">
+            Transcript{media.mic === "off" ? " · paused" : consent ? "" : " · awaiting consent"}
+          </div>
+          <div ref={feedRef} className="tr-body">
+            {lines.length === 0 && Object.values(visibleInterim).every((v) => !v) && (
+              <p className="pru-muted" style={{ fontSize: 12 }}>
+                Appears here as you and the customer speak.
+              </p>
+            )}
+            {lines.slice(-12).map((l) => (
+              <div key={l.id} className={`tr-line ${l.speaker === repName ? "" : "cust"}`}>
+                <span className="who">{l.speaker === repName ? "YOU" : l.speaker.toUpperCase()}</span>
+                {l.flag ? <span className="mark">{l.text}</span> : l.text}
+              </div>
+            ))}
             {Object.entries(visibleInterim).map(([sp, txt]) =>
               txt ? (
-                <div key={"i-" + sp} className={`pru-bubble ${sp === repName ? "" : "customer"}`} style={{ opacity: 0.6 }}>
-                  <span className="who">{sp === repName ? "Representative" : sp}</span>
-                  <div className="txt" style={{ fontStyle: "italic" }}>{txt}</div>
+                <div key={"i-" + sp} className="tr-line now">
+                  <span className="who">{sp === repName ? "YOU · LIVE" : sp.toUpperCase()}</span>
+                  {txt}
                 </div>
               ) : null,
             )}
-            {loading && <div className="pru-muted" style={{ fontSize: 12 }}>●●● analysing…</div>}
-          </div>
-        </div>
-
-        {/* Column 2 — meeting context */}
-        <div className="pru-card" style={colStyle}>
-          <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="pru-ico sm ink"><IconLayers size={15} /></span>
-            <div>
-              <div style={{ fontWeight: 700 }}>Active Meeting Context</div>
-              <div className="pru-muted" style={{ fontSize: 12 }}>Auto-updated from transcript & documents</div>
-            </div>
-          </div>
-          <div className="pru-scroll" style={{ flex: 1, padding: 14 }}>
-            <div className="pru-grid-2" style={{ gap: 10 }}>
-              <ContextBox label="Product area" value={session.productArea} />
-              <ContextBox label="Current topic" value={result?.concern ? "Live concern" : "Listening…"} red />
-            </div>
-            <div className="pru-grid-2" style={{ gap: 10, marginTop: 10 }}>
-              <ContextBox label="Focus" value={session.focus[0] ?? "Advisory support"} />
-              <ContextBox label="Status" value={consent ? "Transcribing" : "Awaiting consent"} />
-            </div>
-
-            <div className="pru-eyebrow" style={{ margin: "16px 0 8px" }}>Side-by-side reference</div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th style={refTh} />
-                  <th style={refTh}>Base plan</th>
-                  <th style={refTh}>Add-on</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  ["Role", "Core protection", "Extra support"],
-                  ["Cost", "Lower premium", "Additional premium"],
-                  ["Support", "Basic coverage", "Improves benefits / cuts cost"],
-                  ["Trade-off", "Lower regular cost", "Stronger support at claim"],
-                ].map((r) => (
-                  <tr key={r[0]}>
-                    <td style={{ ...refTd, color: "var(--muted)", fontWeight: 600 }}>{r[0]}</td>
-                    <td style={refTd}>{r[1]}</td>
-                    <td style={refTd}>{r[2]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="pru-eyebrow" style={{ margin: "16px 0 8px" }}>Referenced documents</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {(result?.sources?.length ? result.sources.map((s) => s.source) : knowledgeDocuments()).map((d, i) => (
-                <div key={i} style={{ fontSize: 12, color: "var(--ink-3)" }}>· {d}</div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Column 3 — pointers */}
-        <div className="pru-card" style={colStyle}>
-          <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span className="pru-ico sm red"><IconSparkle size={15} /></span>
-              <div>
-                <div style={{ fontWeight: 700 }}>PRUAssist Pointers</div>
-                <div className="pru-muted" style={{ fontSize: 12 }}>Private to you</div>
-              </div>
-            </div>
-            <span className={`pru-listen ${loading ? "thinking" : ""}`}>
-              <span className="wave" />
-              <span style={{ color: loading ? "var(--pru)" : "var(--sage)" }}>{loading ? "Thinking" : result ? "Live" : "Listening"}</span>
-            </span>
-          </div>
-          <div className="pru-scroll" style={{ flex: 1, padding: 14 }}>
-            {loading && !result && (
-              <div>
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="pru-pointer" style={{ animationDelay: `${i * 0.06}s` }}>
-                    <div className="pru-skeleton" style={{ height: 13, width: "42%", marginBottom: 11 }} />
-                    <div className="pru-skeleton" style={{ height: 11, width: "92%", marginBottom: 7 }} />
-                    <div className="pru-skeleton" style={{ height: 11, width: "70%" }} />
-                  </div>
-                ))}
-              </div>
-            )}
-            {!result && !note && !loading && (
-              <div className="pru-muted" style={{ fontSize: 13 }}>
-                When the customer asks a question, PRUAssist surfaces private pointers here automatically — grounded in
-                the policy documents, with sources.
-              </div>
-            )}
-            {note && <div className="pru-muted" style={{ fontSize: 13 }}>{note}</div>}
-            {cards.map((c, i) => (
-              <div key={c.key} className={`pru-pointer ${c.key === "line" ? "say" : ""}`} style={{ animationDelay: `${i * 0.05}s` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span className={`cat ${c.cls}`}>● {c.cat}</span>
-                  <span className="pru-muted" style={{ fontSize: 11 }}>#{i + 1}</span>
-                </div>
-                <div className="title">{c.title}</div>
-                <div className="body" style={c.quote ? { fontStyle: "italic" } : undefined}>{c.quote ? `“${c.text}”` : c.text}</div>
-                <div className="actions">
-                  <button className="pru-btn pru-btn-primary pru-btn-sm" onClick={() => markUsed(c.key)} disabled={used.has(c.key)}>
-                    {used.has(c.key) ? "✓ Used" : "Use this"}
-                  </button>
-                  <button className="link" onClick={() => runSuggest({ rephrase: true })}>Rephrase</button>
-                  <button className="link" onClick={() => setDismissed((prev) => new Set(prev).add(c.key))}>Ignore</button>
-                </div>
-              </div>
-            ))}
-            {result && cards.length > 0 && result.sources.length > 0 && (
-              <div style={{ marginTop: 6, fontSize: 11.5 }} className="pru-muted">
-                Grounded in: {result.sources.map((s) => s.source).join(" · ")}
-              </div>
-            )}
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ContextBox({ label, value, red }: { label: string; value: string; red?: boolean }) {
-  return (
-    <div className="pru-card" style={{ padding: 12, background: red ? "var(--pru-red-soft)" : "var(--surface-2)", borderColor: red ? "var(--pru-red-line)" : "var(--line)" }}>
-      <div className="pru-eyebrow">{label}</div>
-      <div style={{ fontWeight: 700, fontSize: 13.5, marginTop: 4, color: red ? "var(--pru-red-dark)" : "var(--ink)" }}>{value}</div>
     </div>
   );
 }
@@ -558,14 +582,3 @@ const CAM_LABEL: Record<DeviceStatus, { text: string; hint: string }> = {
   missing: { text: "No camera", hint: "No camera detected. Check your OS settings, then click to retry." },
   blocked: { text: "Camera blocked", hint: "The browser is blocking the camera. Allow it for this site in the address bar, then reload." },
 };
-
-function deviceBtnStyle(status: DeviceStatus): React.CSSProperties | undefined {
-  if (status === "missing" || status === "blocked") {
-    return { color: "var(--amber)", borderColor: "rgba(178,107,18,0.3)", background: "var(--amber-tint)" };
-  }
-  if (status === "off") return { color: "var(--pru)", borderColor: "var(--pru-line)", background: "var(--pru-tint)" };
-  return undefined;
-}
-
-const refTh: React.CSSProperties = { textAlign: "left", padding: "4px 6px", fontSize: 11, color: "var(--muted)", fontWeight: 700, borderBottom: "1px solid var(--line)" };
-const refTd: React.CSSProperties = { padding: "5px 6px", borderBottom: "1px solid var(--line)", color: "var(--ink-2)", verticalAlign: "top" };

@@ -2,18 +2,24 @@
 
 import { useState } from "react";
 import type { SessionInfo } from "@/lib/console-types";
-import { KNOWLEDGE, knowledgeDocuments } from "@/lib/knowledge";
-import { IconDoc, IconHeart, IconShield } from "../icons";
+import DocumentsInScope from "../DocumentsInScope";
 
 const FOCUS = [
-  "Explain policy differences",
-  "Compare coverage options",
-  "Clarify customer questions",
-  "Address objections",
-  "Review claim scenarios",
+  "policy differences",
+  "coverage options",
+  "customer questions",
+  "objections",
+  "claim scenarios",
 ];
-const DOCS = knowledgeDocuments();
 const PRODUCT_AREA = "Health Protection";
+
+// Reads the selection back as speech rather than a list, because the sentence above is the
+// thing the rep is about to say out loud.
+function asPhrase(items: string[]): string {
+  if (items.length === 0) return "whatever comes up";
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
 
 export default function ConsentStep({
   repName,
@@ -26,7 +32,7 @@ export default function ConsentStep({
 }) {
   const [agree, setAgree] = useState(false);
   const [signature, setSignature] = useState(repName === "Representative" ? "" : repName);
-  const [focus, setFocus] = useState<string[]>(FOCUS.slice(0, 3));
+  const [focus, setFocus] = useState<string[]>(FOCUS.slice(0, 2));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -60,114 +66,97 @@ export default function ConsentStep({
   }
 
   return (
-    <div className="pru-container" style={{ maxWidth: 980 }}>
-      <button className="pru-btn pru-btn-sm" onClick={onBack} style={{ border: "none", padding: "4px 0", background: "none" }}>← Back</button>
-      <span className="pru-eyebrow" style={{ display: "block", marginTop: 6 }}>Step 2 of 4</span>
-      <h1 style={{ fontSize: 36, margin: "10px 0 6px" }}>Consent &amp; meeting context</h1>
-      <p className="pru-muted" style={{ marginBottom: 20, maxWidth: 640, lineHeight: 1.6 }}>
-        Confirm consent and set the meeting context. PRUAssist starts listening only after you start the session, and
-        transcribes the customer only once they consent on their private link.
+    <div className="pru-container" style={{ maxWidth: 940 }}>
+      <button className="link" onClick={onBack} style={{ marginBottom: 12 }}>
+        ← Back
+      </button>
+      <h1 className="doc-title">Before we start recording</h1>
+      <div className="doc-sub">
+        Both parties consent on their own device. Nothing is captured until the customer accepts on theirs.
+      </div>
+
+      {/* The configuration reads as a sentence the rep would actually say, so the setup and the
+          spoken framing of the meeting are the same object. */}
+      <p className="sentence">
+        Today&rsquo;s session covers <span className="slot">{PRODUCT_AREA}</span>, focusing on{" "}
+        <span className="slot multi">{asPhrase(focus)}</span>.
       </p>
 
-      {/* Consent */}
-      <div className="pru-card" style={{ marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-          <span className="pru-ico sm red"><IconShield size={16} /></span>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>Consent Required</div>
-        </div>
-        <p className="pru-muted" style={{ fontSize: 13.5, marginBottom: 16 }}>
-          PRUAssist provides private guidance to the representative only. It does not speak to the customer.
-        </p>
-        <div className="pru-grid-2">
-          <div className="pru-card" style={{ background: "var(--surface-2)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span className="pru-eyebrow">Representative</span>
-              <span className="pru-eyebrow" style={{ color: ready ? "var(--green)" : "var(--muted)" }}>{ready ? "Signed" : "Pending"}</span>
-            </div>
-            <div style={{ fontWeight: 700, margin: "6px 0 10px" }}>Financial Representative Consent</div>
-            <label style={{ display: "flex", gap: 8, fontSize: 13.5, cursor: "pointer", marginBottom: 12 }}>
-              <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-              I agree to use PRUAssist during this advisory session.
-            </label>
-            <label htmlFor="signature" className="pru-eyebrow" style={{ display: "block", marginBottom: 6 }}>Typed signature</label>
-            <input id="signature" name="signature" className="pru-input" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="Type your name" style={{ fontStyle: "italic" }} />
-          </div>
-          <div className="pru-card" style={{ background: "var(--surface-2)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span className="pru-eyebrow">Customer</span>
-              <span className="pru-eyebrow" style={{ color: "var(--muted)" }}>Via private link</span>
-            </div>
-            <div style={{ fontWeight: 700, margin: "6px 0 10px" }}>Customer Consent</div>
-            <p className="pru-muted" style={{ fontSize: 13 }}>
-              After you start, you’ll get a private link to send the customer. They consent to recording on that link
-              before joining — PRUAssist won’t transcribe them until they do.
-            </p>
-          </div>
+      <div className="sec">
+        <div className="sec-h">Meeting focus</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {FOCUS.map((f) => {
+            const on = focus.includes(f);
+            return (
+              <button
+                key={f}
+                type="button"
+                aria-pressed={on}
+                className={`pru-chip ${on ? "on" : ""}`}
+                onClick={() => setFocus((prev) => (on ? prev.filter((x) => x !== f) : [...prev, f]))}
+              >
+                {on ? "✓ " : ""}
+                {f}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Meeting context */}
-      <div className="pru-card">
-        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>Meeting Context</div>
-        <p className="pru-muted" style={{ fontSize: 13.5, marginBottom: 16 }}>Choose the meeting focus. PRUAssist grounds every pointer in the source documents below.</p>
-        <div className="pru-grid-2" style={{ alignItems: "start" }}>
-          <div>
-            <div className="pru-eyebrow" style={{ marginBottom: 8 }}>Product area</div>
-            <div className="pru-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span className="pru-ico sm red"><IconHeart size={16} /></span>
-                <div>
-                  <div style={{ fontWeight: 700 }}>Health Protection</div>
-                  <div className="pru-muted" style={{ fontSize: 12.5 }}>Active scope for this session</div>
-                </div>
-              </div>
-              <span className="pru-muted" style={{ fontSize: 12.5 }}>Fixed for prototype</span>
-            </div>
-            <div className="pru-eyebrow" style={{ margin: "16px 0 8px" }}>Meeting focus</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {FOCUS.map((f) => {
-                const on = focus.includes(f);
-                return (
-                  <button
-                    key={f}
-                    type="button"
-                    aria-pressed={on}
-                    className={`pru-chip ${on ? "on" : ""}`}
-                    onClick={() => setFocus((prev) => (on ? prev.filter((x) => x !== f) : [...prev, f]))}
-                  >
-                    {on ? "✓ " : ""}
-                    {f}
-                  </button>
-                );
-              })}
-            </div>
+      <div className="pru-grid-2" style={{ marginBottom: 24 }}>
+        <div className="consent">
+          <div className="h">
+            <span className="t">Representative</span>
+            <span className={`chip ${ready ? "ok" : "wait"}`}>{ready ? "SIGNED" : "UNSIGNED"}</span>
           </div>
-          <div>
-            <div className="pru-eyebrow" style={{ marginBottom: 8 }}>Source documents</div>
-            {DOCS.map((d) => (
-              <div key={d} className="pru-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: 14, marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span className="pru-ico sm ink"><IconDoc size={15} /></span>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{d}</div>
-                    <div className="pru-muted" style={{ fontSize: 12 }}>{KNOWLEDGE.length} clauses indexed · cited with page numbers</div>
-                  </div>
-                </div>
-                <span className="pru-eyebrow green" style={{ background: "var(--sage-tint)", color: "var(--green)", padding: "3px 9px", borderRadius: 999, flexShrink: 0 }}>● Active</span>
-              </div>
-            ))}
-          </div>
+          <p>
+            I confirm the customer has been told this session is recorded and transcribed to assist my advice.
+          </p>
+          <label style={{ display: "flex", gap: 8, fontSize: 13, cursor: "pointer", marginBottom: 16, color: "var(--ink-2)" }}>
+            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+            I agree to use PRUAssist during this advisory session.
+          </label>
+          <input
+            id="signature"
+            name="signature"
+            className="sigline"
+            value={signature}
+            onChange={(e) => setSignature(e.target.value)}
+            placeholder="Type your name"
+            aria-label="Typed signature"
+          />
+          <span className="sigcap">TYPED SIGNATURE</span>
         </div>
 
-        {error && <p role="alert" style={{ color: "var(--pru-red)", fontSize: 13, marginTop: 14 }}>{error}</p>}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18 }}>
-          <span className="pru-muted" style={{ fontSize: 12.5, maxWidth: 480 }}>
-            By starting, PRUAssist begins listening to your microphone. You can pause or end the session at any time.
-          </span>
-          <button className="pru-btn pru-btn-primary" disabled={!ready || busy} onClick={start}>
-            {busy ? "Starting…" : "● Start Recording"}
-          </button>
+        <div className="consent">
+          <div className="h">
+            <span className="t">Customer</span>
+            <span className="chip wait">AWAITING</span>
+          </div>
+          <p>
+            Sent to their device via private link once you start. They accept there — you can&rsquo;t accept on their
+            behalf, and they aren&rsquo;t transcribed until they do.
+          </p>
+          <div className="await">—</div>
+          <span className="sigcap">LINK NOT YET SENT</span>
         </div>
+      </div>
+
+      <DocumentsInScope title="Documents in scope for this session" />
+
+      {error && (
+        <p role="alert" className="notice bad" style={{ marginTop: 16 }}>
+          {error}
+        </p>
+      )}
+
+      <div className="actions-row">
+        <button className="pru-btn pru-btn-primary" disabled={!ready || busy} onClick={start}>
+          {busy ? "Starting…" : "Start session"}
+        </button>
+        <span className="hint">
+          {ready ? "Recording begins when you start" : "Sign above to enable"}
+        </span>
       </div>
     </div>
   );

@@ -70,7 +70,7 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
   }, []);
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+    <div style={{ minHeight: "100vh", background: "var(--brochure)" }}>
       <Chrome step={step} />
       <main className="pru-main">
         <div key={step} className="pru-enter">

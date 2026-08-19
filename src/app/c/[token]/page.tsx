@@ -15,6 +15,7 @@ import {
 import { RoomEvent, Track } from "livekit-client";
 import "@livekit/components-styles";
 import { useBrowserSpeech } from "@/lib/useBrowserSpeech";
+import { IconCheck, IconX } from "@/components/icons";
 
 type Info = { active: boolean; repName: string; productArea: string };
 
@@ -105,52 +106,68 @@ export default function CustomerPage() {
       {info === null && !ended && <p className="pru-muted">Loading your session…</p>}
       {ended && (
         <Card>
-          <h1 style={{ fontSize: 22, marginBottom: 6 }}>Session ended</h1>
+          <h1 className="doc-title">Session ended</h1>
           <p className="pru-muted">Your representative has ended the advisory session. Thank you — you can close this tab.</p>
         </Card>
       )}
       {info === "invalid" && (
         <Card>
-          <h1 style={{ fontSize: 22, marginBottom: 6 }}>Link not valid</h1>
+          <h1 className="doc-title">Link not valid</h1>
           <p className="pru-muted">This session link is invalid or the session has ended. Please ask your representative for a new link.</p>
         </Card>
       )}
       {info && info !== "invalid" && !info.active && (
         <Card>
-          <h1 style={{ fontSize: 22, marginBottom: 6 }}>Session ended</h1>
+          <h1 className="doc-title">Session ended</h1>
           <p className="pru-muted">This advisory session has ended. You can close this tab.</p>
         </Card>
       )}
       {declined && (
         <Card>
-          <h1 style={{ fontSize: 22, marginBottom: 6 }}>No problem</h1>
+          <h1 className="doc-title">No problem</h1>
           <p className="pru-muted">The session can’t continue without consent to record. You can close this tab.</p>
         </Card>
       )}
       {info && info !== "invalid" && info.active && !declined && !consented && !ended && (
         <Card>
-          <h1 style={{ fontSize: 22, marginBottom: 8 }}>Join your advisory session</h1>
-          <p className="pru-muted" style={{ fontSize: 14, lineHeight: 1.6 }}>
-            You’re joining a session with <b>{info.repName}</b> about <b>{info.productArea}</b>. This conversation will
-            be <b>recorded and transcribed</b> to help your representative explain your options accurately. A private AI
-            assistant supports your representative only — it never speaks to you, and your representative makes every
-            recommendation.
-          </p>
-          <p className="pru-muted" style={{ fontSize: 13, marginTop: 10 }}>By continuing you consent to the recording and transcription of this session.</p>
-          <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-            <button className="pru-btn pru-btn-primary" onClick={giveConsent}>I consent — continue</button>
+          <div className="pru-eyebrow" style={{ marginBottom: 10 }}>Private link · PRUAssist</div>
+          <h1 className="doc-title">{info.repName} has invited you to an advisory session</h1>
+          <div className="doc-sub" style={{ marginBottom: 0 }}>{info.productArea}</div>
+          {/* Three plain facts, including what does NOT happen — the point most likely to be
+              doubted, and the one a customer deserves stated outright. */}
+          <div className="cust-card">
+            <ul>
+              <li>
+                <IconCheck size={15} />
+                <span>Your camera and voice are shared with {info.repName} only.</span>
+              </li>
+              <li>
+                <IconCheck size={15} />
+                <span>The conversation is transcribed so they can quote the policy accurately.</span>
+              </li>
+              <li>
+                <IconX size={15} />
+                <span>A private assistant helps them find the right wording — it never speaks to you, and never makes the recommendation.</span>
+              </li>
+            </ul>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="pru-btn pru-btn-primary" onClick={giveConsent}>I agree — continue</button>
             <button className="pru-btn" onClick={() => setDeclined(true)}>Decline</button>
           </div>
+          <p className="pru-muted" style={{ fontSize: 12.5, marginTop: 14, lineHeight: 1.6 }}>
+            You can leave at any time. Declining ends the session for both of you.
+          </p>
         </Card>
       )}
       {info && info !== "invalid" && info.active && consented && !ended && serverUrl && (
-        <Card wide>
-          <h1 style={{ fontSize: 22, marginBottom: 4 }}>Set up your camera & mic</h1>
+        <Card>
+          <h1 className="doc-title">Set up your camera and mic</h1>
           <p className="pru-muted" style={{ marginBottom: 16, fontSize: 14 }}>Then join — your representative is waiting.</p>
           <div data-lk-theme="default">
             <PreJoin onSubmit={join} defaults={{ username: "", videoEnabled: true, audioEnabled: true }} />
           </div>
-          {error && <p style={{ color: "var(--pru-red)", marginTop: 14 }}>{error}</p>}
+          {error && <p style={{ color: "var(--pru)", marginTop: 14 }}>{error}</p>}
         </Card>
       )}
     </Shell>
@@ -238,9 +255,8 @@ function CustomerStage({ name }: { name: string }) {
           alignItems: "center",
           gap: 12,
           padding: "16px 20px",
-          background: "rgba(8,8,12,0.92)",
-          borderTop: "1px solid rgba(255,255,255,0.08)",
-          backdropFilter: "blur(8px)",
+          background: "var(--brochure)",
+          borderTop: "1px solid var(--rule)",
         }}
       >
         <button
@@ -274,25 +290,21 @@ function CustomerStage({ name }: { name: string }) {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)" }}>
+    <div style={{ minHeight: "100dvh", background: "var(--brochure)" }}>
       <header className="pru-header">
-        <div className="pru-logo">
-          <div className="mark">P</div>
-          <div>
-            <div className="name">PRUAssist</div>
-            <div className="sub">Advisory Session</div>
-          </div>
-        </div>
+        <span className="pru-logo">
+          PRU<i>Assist</i>
+        </span>
+        <span className="pru-tag">
+          <span className="dot" />
+          Advisory session
+        </span>
       </header>
-      <main style={{ display: "grid", placeItems: "center", padding: "28px 16px" }}>{children}</main>
+      <main className="cust-wrap">{children}</main>
     </div>
   );
 }
 
-function Card({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
-  return (
-    <div className="pru-card" style={{ width: wide ? "min(560px, 100%)" : "min(480px, 100%)", marginTop: 24 }}>
-      {children}
-    </div>
-  );
+function Card({ children }: { children: React.ReactNode }) {
+  return <div>{children}</div>;
 }
