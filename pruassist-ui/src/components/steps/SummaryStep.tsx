@@ -4,16 +4,31 @@ import { useEffect, useState } from "react";
 import type { SummaryData } from "@/lib/console-types";
 import { IconShield } from "../icons";
 
-export default function SummaryStep({ summary, onNewSession }: { summary: SummaryData; onNewSession: () => void }) {
+export default function SummaryStep({
+  summary,
+  productArea,
+  onNewSession,
+}: {
+  summary: SummaryData;
+  productArea: string;
+  onNewSession: () => void;
+}) {
   const [notes, setNotes] = useState("");
   const s = summary.stats;
+
+  const startNew = () => {
+    // The typed notes live only in this component and feed only the export, so leaving
+    // without them is unrecoverable.
+    if (notes.trim() && !window.confirm("Your typed notes haven’t been exported and will be lost. Start a new session anyway?")) return;
+    onNewSession();
+  };
 
   const exportBrief = () => {
     const block = (title: string, items: string[]) =>
       [title, ...(items.length ? items.map((i) => `  - ${i}`) : ["  - (none captured)"]), ""].join("\n");
     const text = [
       "PRUAssist — Advisor Session Brief",
-      `Health Protection · ${summary.durationMin} min`,
+      `${productArea} · ${summary.durationMin} min`,
       "",
       block("Key customer concerns:", summary.concerns),
       block("Talking points:", summary.talkingPoints),
@@ -31,8 +46,12 @@ export default function SummaryStep({ summary, onNewSession }: { summary: Summar
     const a = document.createElement("a");
     a.href = url;
     a.download = "pruassist-advisor-brief.txt";
+    // The anchor must be in the document for a programmatic click to download in Firefox, and
+    // the object URL must outlive the click — revoking in the same tick aborts the download.
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
 
   return (
@@ -42,11 +61,11 @@ export default function SummaryStep({ summary, onNewSession }: { summary: Summar
           <span className="pru-eyebrow pill green" style={{ background: "var(--sage-tint)", color: "var(--green)" }}>● Session ended</span>
           <h1 style={{ fontSize: 36, margin: "12px 0 4px" }}>Advisor session summary</h1>
           <div className="pru-muted" style={{ fontSize: 13.5 }}>
-            Health Protection · {summary.durationMin} min · {s.flags} customer concern{s.flags === 1 ? "" : "s"} flagged
+            {productArea} · {summary.durationMin} min · {summary.concerns.length} customer concern{summary.concerns.length === 1 ? "" : "s"} captured
           </div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button className="pru-btn" onClick={onNewSession}>Start New Session</button>
+          <button className="pru-btn" onClick={startNew}>Start New Session</button>
           <button className="pru-btn pru-btn-primary" onClick={exportBrief}>↓ Export Advisor Brief</button>
         </div>
       </div>
@@ -60,11 +79,12 @@ export default function SummaryStep({ summary, onNewSession }: { summary: Summar
         <div className="pru-card">
           <span className="pru-eyebrow pill">Representative notes</span>
           <p className="pru-muted" style={{ fontSize: 13.5, margin: "12px 0", lineHeight: 1.5 }}>{summary.notes || "No automated notes captured."}</p>
-          <textarea className="pru-input" rows={4} placeholder="Add additional notes…" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ resize: "vertical" }} />
+          <label htmlFor="rep-notes" className="pru-eyebrow" style={{ display: "block", marginBottom: 7 }}>Your notes</label>
+          <textarea id="rep-notes" name="notes" className="pru-input" rows={4} placeholder="Add additional notes…" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ resize: "vertical" }} />
         </div>
       </div>
 
-      <div className="pru-card pru-stagger" style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+      <div className="pru-card pru-stagger pru-stats" style={{ marginTop: 18 }}>
         <Stat label="Pointers surfaced" value={s.surfaced} />
         <Stat label="Pointers used" value={s.used} />
         <Stat label="Confusion flags" value={s.flags} />

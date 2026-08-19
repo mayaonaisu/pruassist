@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
-import { cookies } from "next/headers";
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { currentRep } from "@/lib/auth";
 import { getByToken, getByRoom } from "@/lib/sessions";
 
 export const runtime = "nodejs";
@@ -22,17 +21,15 @@ export async function GET(req: NextRequest) {
 
   if (joinToken) {
     // Customer path — must present a valid, active session link.
-    const s = getByToken(joinToken);
+    const s = await getByToken(joinToken);
     if (!s || !s.active) {
       return NextResponse.json({ error: "This session link is invalid or the session has ended." }, { status: 403 });
     }
     roomId = s.roomId;
   } else {
     // Rep path — must be authenticated AND the room must be an active session.
-    const cookieTok = (await cookies()).get(SESSION_COOKIE)?.value;
-    const auth = cookieTok ? await verifySessionToken(cookieTok) : null;
-    if (!auth) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-    const s = room ? getByRoom(room) : null;
+    if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+    const s = room ? await getByRoom(room) : null;
     if (!s || !s.active) return NextResponse.json({ error: "No active session for this room." }, { status: 403 });
     roomId = s.roomId;
   }

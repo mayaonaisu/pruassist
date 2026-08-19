@@ -19,7 +19,7 @@
   --ink: oklch(0.16 0.02 260);
   --ink-2: oklch(0.34 0.02 260);
   --ink-3: oklch(0.5 0.017 260);
-  --ink-4: oklch(0.64 0.012 260);
+  --ink-4: oklch(0.55 0.012 260); /* 4.5:1 on --surface — used for 13px step labels & placeholders */
   --on-ink: oklch(0.97 0.004 90);
   --on-ink-2: oklch(0.72 0.01 260);
 
@@ -39,11 +39,13 @@
   /* ---- semantic ---- */
   --sage: oklch(0.52 0.1 160);
   --sage-tint: oklch(0.52 0.1 160 / 0.12);
-  --amber: oklch(0.58 0.12 65);
+  /* Semantic text colours are darkened to clear 4.5:1 on their own tints — these are small
+     functional labels the rep reads mid-call, not decoration. Tints keep the lighter hue. */
+  --amber: oklch(0.5 0.12 65);
   --amber-tint: oklch(0.58 0.12 65 / 0.13);
   --blue: oklch(0.5 0.14 258);
   --blue-tint: oklch(0.5 0.14 258 / 0.11);
-  --gold: oklch(0.68 0.09 80);
+  --gold: oklch(0.5 0.09 80);
   --gold-soft: oklch(0.68 0.09 80 / 0.14);
   --gold-line: oklch(0.68 0.09 80 / 0.34);
 
@@ -82,15 +84,17 @@
   padding: 0;
   margin: 0;
 }
-html,
-body {
+html {
   max-width: 100vw;
   overflow-x: hidden;
   color-scheme: light;
   scroll-behavior: smooth;
 }
+/* overflow-x here would make `body` a scroll container (overflow-y computes to auto), and a
+   sticky header inside a scrollport that never scrolls just scrolls away with the page. */
 body {
-  min-height: 100vh;
+  max-width: 100vw;
+  min-height: 100dvh;
   color: var(--ink);
   background: var(--paper);
   font-family: var(--font-sans);
@@ -106,10 +110,11 @@ a {
   background: var(--pru-tint-2);
   color: var(--pru-press);
 }
+/* Must be `outline`, not `box-shadow`: buttons, chips and pills all set their own box-shadow in
+   later rules at equal specificity, which silently overwrote the focus ring on every control. */
 :focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--pru-tint-2);
-  border-radius: var(--r-sm);
+  outline: 2px solid var(--pru);
+  outline-offset: 2px;
 }
 
 /* subtle scrollbars */
@@ -674,6 +679,9 @@ h3 {
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    /* Without this, staggered entrances keep their delay and hold `opacity: 0` (fill-mode: both)
+       for up to 450ms — so asking for less motion produces a flash of blank content. */
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
@@ -1116,3 +1124,67 @@ h3 {
 }
 .pru-cta h2 { color: #fff; }
 .pru-cta p { color: var(--on-ink-2); }
+
+/* ============ hero (landing) ============ */
+.pru-hero {
+  padding: 72px 28px 56px;
+  display: grid;
+  grid-template-columns: 1fr 1.04fr;
+  gap: 60px;
+  align-items: center;
+}
+.pru-hero h1 { font-size: clamp(34px, 6.2vw, 64px); }
+.pru-hero > * { min-width: 0; }
+
+/* ============ live console (rep) ============
+   Sized to the viewport rather than a fixed floor: a hard min-height taller than a laptop
+   screen pushes the AI pointers column below the fold for the whole call. */
+.pru-live {
+  height: calc(100dvh - 140px);
+  min-height: 560px;
+}
+
+/* Anchor targets sit under the sticky header without this. */
+#moment,
+#trust {
+  scroll-margin-top: 84px;
+}
+
+/* ============ responsive ============ */
+@media (max-width: 980px) {
+  .pru-hero { grid-template-columns: 1fr; gap: 40px; padding: 48px 20px 40px; }
+  .pru-grid-3 { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .pru-timeline { grid-template-columns: 1fr; gap: 34px; margin-top: 34px; }
+  .pru-timeline::before { display: none; }
+  .pru-tl-node { padding-right: 0; }
+  .pru-tl-node p { max-width: none; }
+  .pru-trust { grid-template-columns: 1fr; }
+  .pru-trust > div { border-left: none; border-top: 1px solid var(--line); padding: 24px 0 8px; }
+  .pru-trust > div:first-child { border-top: none; }
+}
+
+@media (max-width: 860px) {
+  /* Row 1 keeps the logo and the sign-in CTA; the step/nav strip drops to its own row so it
+     can never push the CTA off-screen (overflow-x is hidden, so off-screen means unreachable). */
+  .pru-header { padding: 12px 16px; gap: 12px 14px; flex-wrap: wrap; }
+  .pru-steps { order: 3; flex-basis: 100%; flex-wrap: wrap; justify-content: flex-start; gap: 10px 18px; }
+}
+
+@media (max-width: 760px) {
+  .pru-grid-2 { grid-template-columns: 1fr; }
+  .pru-main { padding: 20px 16px 32px; }
+  .pru-card { padding: 18px; }
+  .pru-cta { padding: 44px 22px; }
+}
+
+.pru-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+@media (max-width: 760px) {
+  .pru-stats { grid-template-columns: repeat(2, 1fr); gap: 20px 16px; }
+}

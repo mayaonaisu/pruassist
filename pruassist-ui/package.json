@@ -9,10 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.106.0",
     "@google/genai": "^2.10.0",
     "@livekit/components-react": "^2.9.21",
     "@livekit/components-styles": "^1.2.0",
+    "@upstash/redis": "^1.38.2",
     "jose": "^6.2.3",
     "livekit-client": "^2.20.0",
     "livekit-server-sdk": "^2.15.5",

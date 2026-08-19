@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { SessionInfo } from "@/lib/console-types";
+import { KNOWLEDGE, knowledgeDocuments } from "@/lib/knowledge";
 import { IconDoc, IconHeart, IconShield } from "../icons";
 
 const FOCUS = [
@@ -11,11 +12,8 @@ const FOCUS = [
   "Address objections",
   "Review claim scenarios",
 ];
-const DOCS = [
-  { name: "Base Health Protection Plan", meta: "PRUShield · master policy" },
-  { name: "Add-on / Rider Document", meta: "PRUExtra · riders 2026" },
-  { name: "Claims and FAQ Document", meta: "Internal reference" },
-];
+const DOCS = knowledgeDocuments();
+const PRODUCT_AREA = "Health Protection";
 
 export default function ConsentStep({
   repName,
@@ -42,11 +40,19 @@ export default function ConsentStep({
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productArea: "Health Protection", focus }),
+        body: JSON.stringify({ productArea: PRODUCT_AREA, focus, repName: signature.trim() }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not start the session.");
-      onStarted({ ...data, productArea: "Health Protection", focus });
+      // The rep sign-in expires after 8 hours but /rep is only gated on page load, so a console
+      // left open overnight fails here — send them to sign in again instead of showing a dead end.
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.error === "string" ? data.error : "Could not start the session.");
+      }
+      onStarted({ ...(await res.json()), productArea: PRODUCT_AREA, focus });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start the session.");
       setBusy(false);
@@ -83,8 +89,8 @@ export default function ConsentStep({
               <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
               I agree to use PRUAssist during this advisory session.
             </label>
-            <div className="pru-eyebrow" style={{ marginBottom: 6 }}>Typed signature</div>
-            <input className="pru-input" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="Type your name" style={{ fontStyle: "italic" }} />
+            <label htmlFor="signature" className="pru-eyebrow" style={{ display: "block", marginBottom: 6 }}>Typed signature</label>
+            <input id="signature" name="signature" className="pru-input" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="Type your name" style={{ fontStyle: "italic" }} />
           </div>
           <div className="pru-card" style={{ background: "var(--surface-2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -103,7 +109,7 @@ export default function ConsentStep({
       {/* Meeting context */}
       <div className="pru-card">
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>Meeting Context</div>
-        <p className="pru-muted" style={{ fontSize: 13.5, marginBottom: 16 }}>Pick the product area and policy documents PRUAssist should reference.</p>
+        <p className="pru-muted" style={{ fontSize: 13.5, marginBottom: 16 }}>Choose the meeting focus. PRUAssist grounds every pointer in the source documents below.</p>
         <div className="pru-grid-2" style={{ alignItems: "start" }}>
           <div>
             <div className="pru-eyebrow" style={{ marginBottom: 8 }}>Product area</div>
@@ -124,6 +130,8 @@ export default function ConsentStep({
                 return (
                   <button
                     key={f}
+                    type="button"
+                    aria-pressed={on}
                     className={`pru-chip ${on ? "on" : ""}`}
                     onClick={() => setFocus((prev) => (on ? prev.filter((x) => x !== f) : [...prev, f]))}
                   >
@@ -135,23 +143,23 @@ export default function ConsentStep({
             </div>
           </div>
           <div>
-            <div className="pru-eyebrow" style={{ marginBottom: 8 }}>Active documents</div>
+            <div className="pru-eyebrow" style={{ marginBottom: 8 }}>Source documents</div>
             {DOCS.map((d) => (
-              <div key={d.name} className="pru-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 14, marginBottom: 10 }}>
+              <div key={d} className="pru-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: 14, marginBottom: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span className="pru-ico sm ink"><IconDoc size={15} /></span>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{d.name}</div>
-                    <div className="pru-muted" style={{ fontSize: 12 }}>{d.meta}</div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{d}</div>
+                    <div className="pru-muted" style={{ fontSize: 12 }}>{KNOWLEDGE.length} clauses indexed · cited with page numbers</div>
                   </div>
                 </div>
-                <span className="pru-eyebrow green" style={{ background: "var(--sage-tint)", color: "var(--green)", padding: "3px 9px", borderRadius: 999 }}>● Active</span>
+                <span className="pru-eyebrow green" style={{ background: "var(--sage-tint)", color: "var(--green)", padding: "3px 9px", borderRadius: 999, flexShrink: 0 }}>● Active</span>
               </div>
             ))}
           </div>
         </div>
 
-        {error && <p style={{ color: "var(--pru-red)", fontSize: 13, marginTop: 14 }}>{error}</p>}
+        {error && <p role="alert" style={{ color: "var(--pru-red)", fontSize: 13, marginTop: 14 }}>{error}</p>}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18 }}>
           <span className="pru-muted" style={{ fontSize: 12.5, maxWidth: 480 }}>
             By starting, PRUAssist begins listening to your microphone. You can pause or end the session at any time.

@@ -12,6 +12,8 @@ import {
 import { RoomEvent, Track } from "livekit-client";
 import "@livekit/components-styles";
 import { useBrowserSpeech } from "@/lib/useBrowserSpeech";
+import { useLocalMedia, type DeviceStatus } from "@/lib/useLocalMedia";
+import { knowledgeDocuments } from "@/lib/knowledge";
 import type { SessionInfo, Stats } from "@/lib/console-types";
 import { IconLayers, IconSparkle, IconWave } from "../icons";
 
@@ -134,9 +136,13 @@ function LiveConsole({
   const inFlightRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTriggerRef = useRef("");
-  const startRef = useRef(Date.now());
+  const startRef = useRef(0);
   const statsRef = useRef<Stats>({ surfaced: 0, used: 0, flags: 0, docs: 0 });
   const docsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    startRef.current = Date.now();
+  }, []);
 
   const addFinal = useCallback((speaker: string, text: string, flag = false) => {
     if (!text.trim()) return;
@@ -147,20 +153,16 @@ function LiveConsole({
     setInterim((prev) => ({ ...prev, [speaker]: text }));
   }, []);
 
+  const media = useLocalMedia(room);
+  const micEnabled = media.mic === "on";
+
   // Transcribe the rep's own speech only while their mic is live. Muting the mic must also pause
   // transcription — otherwise "Mute" silences the customer's audio but the transcript (and the AI)
-  // keep capturing the rep's words. Read off the live LiveKit track, kept fresh by the track-event
-  // re-render wired up further below.
-  const micEnabled = room?.localParticipant?.isMicrophoneEnabled ?? false;
-  useBrowserSpeech(micEnabled, ({ final, interim: itm }) => {
+  // keep capturing the rep's words.
+  const speech = useBrowserSpeech(micEnabled, ({ final, interim: itm }) => {
     if (final) addFinal(repName, final);
     if (itm) setSpeakerInterim(repName, itm);
   });
-
-  // When muted, drop any half-captured phrase so no stale "live" text lingers in the transcript.
-  useEffect(() => {
-    if (!micEnabled) setInterim((prev) => (prev[repName] ? { ...prev, [repName]: "" } : prev));
-  }, [micEnabled, repName]);
 
   useEffect(() => {
     if (!room) return;
@@ -208,7 +210,10 @@ function LiveConsole({
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight });
   }, [lines, interim]);
 
-  const runSuggest = useCallback(async () => {
+  // `rephrase` re-runs the same question to get different wording. It replaces the current
+  // pointers rather than adding new ones, so it must not count again — otherwise a rep who
+  // rewords one question three times books it as three confusion flags in the session stats.
+  const runSuggest = useCallback(async ({ rephrase = false }: { rephrase?: boolean } = {}) => {
     if (inFlightRef.current) return;
     const transcript = linesRef.current.slice(-12).map((l) => `${l.speaker}: ${l.text}`).join("\n");
     if (!transcript) {
@@ -240,9 +245,11 @@ function LiveConsole({
         setResult(r);
         setDismissed(new Set());
         setUsed(new Set());
-        const fields = [r.concern, r.firstStep, r.suggestedLine, r.explainer, r.comparison, r.followUp].filter(Boolean).length;
-        statsRef.current.surfaced += fields;
-        if (r.concern) statsRef.current.flags += 1;
+        if (!rephrase) {
+          const fields = [r.concern, r.firstStep, r.suggestedLine, r.explainer, r.comparison, r.followUp].filter(Boolean).length;
+          statsRef.current.surfaced += fields;
+          if (r.concern) statsRef.current.flags += 1;
+        }
         r.sources.forEach((s) => docsRef.current.add(s.source));
       }
     } catch {
@@ -273,69 +280,6 @@ function LiveConsole({
     statsRef.current.used += 1;
   };
 
-  // Rep's own mic / camera. Read straight off the live track each render (no separate state to
-  // drift), re-render on track events, and NEVER disable the button — so it's always clickable.
-  const [, bumpMedia] = useState(0);
-  const [micPresent, setMicPresent] = useState<boolean | null>(null);
-  const [camPresent, setCamPresent] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (!room) return;
-    const bump = () => bumpMedia((n) => n + 1);
-    room
-      .on(RoomEvent.LocalTrackPublished, bump)
-      .on(RoomEvent.LocalTrackUnpublished, bump)
-      .on(RoomEvent.TrackMuted, bump)
-      .on(RoomEvent.TrackUnmuted, bump);
-    return () => {
-      room
-        .off(RoomEvent.LocalTrackPublished, bump)
-        .off(RoomEvent.LocalTrackUnpublished, bump)
-        .off(RoomEvent.TrackMuted, bump)
-        .off(RoomEvent.TrackUnmuted, bump);
-    };
-  }, [room]);
-
-  // Does this machine actually expose a mic / camera the browser can use? On many setups there is
-  // no microphone at all (camera-only webcam, mic disabled in OS privacy settings) — in that case
-  // a "Muted" button that can never un-mute is just confusing, so we surface the real state.
-  const checkDevices = useCallback(async () => {
-    try {
-      const devs = await navigator.mediaDevices.enumerateDevices();
-      setMicPresent(devs.some((d) => d.kind === "audioinput"));
-      setCamPresent(devs.some((d) => d.kind === "videoinput"));
-    } catch {
-      setMicPresent(false);
-      setCamPresent(false);
-    }
-  }, []);
-  useEffect(() => {
-    checkDevices();
-    const md = navigator.mediaDevices;
-    md?.addEventListener?.("devicechange", checkDevices);
-    return () => md?.removeEventListener?.("devicechange", checkDevices);
-  }, [checkDevices]);
-
-  const camEnabled = room?.localParticipant?.isCameraEnabled ?? false;
-  const noMic = micPresent === false;
-  const noCam = camPresent === false;
-  const toggleMic = () => {
-    // No mic detected yet — re-scan (the rep may have just plugged one in or fixed OS settings).
-    if (noMic) {
-      checkDevices();
-      return;
-    }
-    const lp = room?.localParticipant;
-    lp?.setMicrophoneEnabled(!lp.isMicrophoneEnabled).catch(() => checkDevices());
-  };
-  const toggleCam = () => {
-    if (noCam) {
-      checkDevices();
-      return;
-    }
-    const lp = room?.localParticipant;
-    lp?.setCameraEnabled(!lp.isCameraEnabled).catch(() => checkDevices());
-  };
-
   const end = () => {
     const transcript = linesRef.current.map((l) => `${l.speaker}: ${l.text}`).join("\n");
     const dur = Math.max(1, Math.round((Date.now() - startRef.current) / 60000));
@@ -362,10 +306,24 @@ function LiveConsole({
     : [];
   const cards = allCards.filter((c) => c.text && !dismissed.has(c.key));
 
+  // While the rep is muted, drop their half-captured phrase so no stale "live" text lingers.
+  const visibleInterim = micEnabled ? interim : { ...interim, [repName]: "" };
+
+  const micAlert =
+    media.mic === "missing"
+      ? "No microphone detected. Your audio isn’t being shared and your speech won’t be transcribed. Enable a mic in your OS sound settings, then click “No microphone” to retry. The camera and the customer’s audio are unaffected."
+      : media.mic === "blocked"
+        ? "Your browser is blocking microphone access. Your speech won’t be transcribed. Allow the microphone for this site (click the padlock in the address bar), then reload — the warning clears itself once access is granted."
+        : speech === "unsupported"
+          ? "Live transcription needs Chrome or Edge. The call itself works normally in this browser, but your speech won’t appear in the transcript."
+          : speech === "denied"
+            ? "Speech recognition was blocked by the browser, so your side of the conversation won’t be transcribed. Allow microphone access for this site and reload."
+            : null;
+
   const colStyle: React.CSSProperties = { height: "100%", minHeight: 0, display: "flex", flexDirection: "column", padding: 0 };
 
   return (
-    <div style={{ height: "calc(100vh - 150px)", minHeight: 1000, display: "flex", flexDirection: "column", gap: 14 }}>
+    <div className="pru-live" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* control bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -379,22 +337,22 @@ function LiveConsole({
           <button
             type="button"
             className="pru-btn pru-btn-sm"
-            onClick={toggleMic}
-            title={noMic ? "No microphone detected. Check your OS sound settings & mic privacy, then click to retry." : micEnabled ? "Mute microphone" : "Unmute microphone"}
-            style={noMic ? { color: "var(--amber)", borderColor: "rgba(178,107,18,0.3)", background: "var(--amber-tint)" } : micEnabled ? undefined : { color: "var(--pru)", borderColor: "var(--pru-line)", background: "var(--pru-tint)" }}
+            onClick={media.toggleMic}
+            title={MIC_LABEL[media.mic].hint}
+            style={deviceBtnStyle(media.mic)}
           >
-            <IconMic off={!micEnabled || noMic} />
-            {noMic ? "No microphone" : micEnabled ? "Mic" : "Muted"}
+            <IconMic off={media.mic !== "on"} />
+            {MIC_LABEL[media.mic].text}
           </button>
           <button
             type="button"
             className="pru-btn pru-btn-sm"
-            onClick={toggleCam}
-            title={noCam ? "No camera detected. Check your OS settings, then click to retry." : camEnabled ? "Turn camera off" : "Turn camera on"}
-            style={noCam ? { color: "var(--amber)", borderColor: "rgba(178,107,18,0.3)", background: "var(--amber-tint)" } : camEnabled ? undefined : { color: "var(--pru)", borderColor: "var(--pru-line)", background: "var(--pru-tint)" }}
+            onClick={media.toggleCam}
+            title={CAM_LABEL[media.cam].hint}
+            style={deviceBtnStyle(media.cam)}
           >
-            <IconCam off={!camEnabled || noCam} />
-            {noCam ? "No camera" : camEnabled ? "Camera" : "Camera off"}
+            <IconCam off={media.cam !== "on"} />
+            {CAM_LABEL[media.cam].text}
           </button>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -406,21 +364,18 @@ function LiveConsole({
         </div>
       </div>
 
-      {noMic && (
-        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 10, padding: "9px 13px", borderRadius: 10, background: "var(--amber-tint)", border: "1px solid rgba(178,107,18,0.28)", color: "var(--amber)", fontSize: 12.5 }}>
+      {micAlert && (
+        <div role="status" style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 10, padding: "9px 13px", borderRadius: 10, background: "var(--amber-tint)", border: "1px solid rgba(178,107,18,0.28)", color: "var(--amber)", fontSize: 12.5 }}>
           <IconMic off />
-          <span>
-            <strong>No microphone detected.</strong> Your audio isn’t being shared and your speech won’t be transcribed.
-            Enable a mic in your OS sound settings (and allow mic access for the browser), then click <strong>“No microphone”</strong> to retry. The camera and customer’s audio are unaffected.
-          </span>
+          <span>{micAlert}</span>
         </div>
       )}
 
-      <div style={{ flex: "2 1 0", minHeight: 340 }}>
+      <div style={{ flex: "2 1 0", minHeight: 200 }}>
         <VideoStrip />
       </div>
 
-      <div className="pru-grid-3" style={{ flex: "1.15 1 0", minHeight: 240, alignItems: "stretch" }}>
+      <div className="pru-grid-3" style={{ flex: "1.15 1 0", minHeight: 200, alignItems: "stretch" }}>
         {/* Column 1 — transcript */}
         <div className="pru-card" style={colStyle}>
           <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 10 }}>
@@ -428,7 +383,7 @@ function LiveConsole({
             <div>
               <div style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
                 Live Transcript
-                {!micEnabled && !noMic && (
+                {media.mic === "off" && (
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.03em", textTransform: "uppercase", color: "var(--amber)", background: "var(--amber-tint)", padding: "2px 7px", borderRadius: 999 }}>
                     Paused · muted
                   </span>
@@ -438,7 +393,7 @@ function LiveConsole({
             </div>
           </div>
           <div ref={feedRef} className="pru-scroll" style={{ flex: 1, padding: 14 }}>
-            {lines.length === 0 && Object.values(interim).every((v) => !v) && (
+            {lines.length === 0 && Object.values(visibleInterim).every((v) => !v) && (
               <div className="pru-muted" style={{ fontSize: 13 }}>Transcript appears here as you and the customer speak. (Chrome / Edge.)</div>
             )}
             {lines.map((l) => {
@@ -453,7 +408,7 @@ function LiveConsole({
                 </div>
               );
             })}
-            {Object.entries(interim).map(([sp, txt]) =>
+            {Object.entries(visibleInterim).map(([sp, txt]) =>
               txt ? (
                 <div key={"i-" + sp} className={`pru-bubble ${sp === repName ? "" : "customer"}`} style={{ opacity: 0.6 }}>
                   <span className="who">{sp === repName ? "Representative" : sp}</span>
@@ -511,7 +466,7 @@ function LiveConsole({
 
             <div className="pru-eyebrow" style={{ margin: "16px 0 8px" }}>Referenced documents</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {(result?.sources?.length ? result.sources.map((s) => s.source) : ["Base Health Protection Plan", "Add-on / Rider Document", "Claims and FAQ Document"]).map((d, i) => (
+              {(result?.sources?.length ? result.sources.map((s) => s.source) : knowledgeDocuments()).map((d, i) => (
                 <div key={i} style={{ fontSize: 12, color: "var(--ink-3)" }}>· {d}</div>
               ))}
             </div>
@@ -564,7 +519,7 @@ function LiveConsole({
                   <button className="pru-btn pru-btn-primary pru-btn-sm" onClick={() => markUsed(c.key)} disabled={used.has(c.key)}>
                     {used.has(c.key) ? "✓ Used" : "Use this"}
                   </button>
-                  <button className="link" onClick={runSuggest}>Rephrase</button>
+                  <button className="link" onClick={() => runSuggest({ rephrase: true })}>Rephrase</button>
                   <button className="link" onClick={() => setDismissed((prev) => new Set(prev).add(c.key))}>Ignore</button>
                 </div>
               </div>
@@ -588,6 +543,28 @@ function ContextBox({ label, value, red }: { label: string; value: string; red?:
       <div style={{ fontWeight: 700, fontSize: 13.5, marginTop: 4, color: red ? "var(--pru-red-dark)" : "var(--ink)" }}>{value}</div>
     </div>
   );
+}
+
+const MIC_LABEL: Record<DeviceStatus, { text: string; hint: string }> = {
+  on: { text: "Mic", hint: "Mute microphone" },
+  off: { text: "Muted", hint: "Unmute microphone" },
+  missing: { text: "No microphone", hint: "No microphone detected. Check your OS sound settings, then click to retry." },
+  blocked: { text: "Mic blocked", hint: "The browser is blocking the microphone. Allow it for this site in the address bar, then reload." },
+};
+
+const CAM_LABEL: Record<DeviceStatus, { text: string; hint: string }> = {
+  on: { text: "Camera", hint: "Turn camera off" },
+  off: { text: "Camera off", hint: "Turn camera on" },
+  missing: { text: "No camera", hint: "No camera detected. Check your OS settings, then click to retry." },
+  blocked: { text: "Camera blocked", hint: "The browser is blocking the camera. Allow it for this site in the address bar, then reload." },
+};
+
+function deviceBtnStyle(status: DeviceStatus): React.CSSProperties | undefined {
+  if (status === "missing" || status === "blocked") {
+    return { color: "var(--amber)", borderColor: "rgba(178,107,18,0.3)", background: "var(--amber-tint)" };
+  }
+  if (status === "off") return { color: "var(--pru)", borderColor: "var(--pru-line)", background: "var(--pru-tint)" };
+  return undefined;
 }
 
 const refTh: React.CSSProperties = { textAlign: "left", padding: "4px 6px", fontSize: 11, color: "var(--muted)", fontWeight: 700, borderBottom: "1px solid var(--line)" };

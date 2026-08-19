@@ -21,18 +21,22 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Login failed.");
+      // Parse only after checking res.ok — an HTML error page from a proxy would otherwise throw
+      // a JSON syntax error and show the rep a raw parser message.
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.error === "string" ? data.error : "Sign in failed. Please try again.");
+      }
       router.push("/rep");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed.");
+      setError(err instanceof Error ? err.message : "Sign in failed. Please try again.");
       setLoading(false);
     }
   }
 
   return (
-    <main style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24 }}>
-      <div className="pru-enter" style={{ width: "min(400px, 94vw)" }}>
+    <main style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: "24px 16px" }}>
+      <div className="pru-enter" style={{ width: "min(400px, 100%)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11, justifyContent: "center", marginBottom: 22 }}>
           <div className="pru-logo">
             <div className="mark">P</div>
@@ -51,13 +55,13 @@ export default function LoginPage() {
             PRUAssist is private to the representative — it never speaks to the customer.
           </p>
 
-          <label className="pru-eyebrow" style={{ display: "block", marginBottom: 7 }}>Username</label>
-          <input className="pru-input" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+          <label htmlFor="username" className="pru-eyebrow" style={{ display: "block", marginBottom: 7 }}>Username</label>
+          <input id="username" name="username" className="pru-input" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
 
-          <label className="pru-eyebrow" style={{ display: "block", margin: "14px 0 7px" }}>Password</label>
-          <input className="pru-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+          <label htmlFor="password" className="pru-eyebrow" style={{ display: "block", margin: "14px 0 7px" }}>Password</label>
+          <input id="password" name="password" className="pru-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
 
-          {error && <p style={{ color: "var(--pru)", fontSize: 13, marginTop: 13, fontWeight: 600 }}>{error}</p>}
+          {error && <p role="alert" style={{ color: "var(--pru)", fontSize: 13, marginTop: 13, fontWeight: 600 }}>{error}</p>}
 
           <button className="pru-btn pru-btn-primary" disabled={loading} style={{ width: "100%", marginTop: 18, padding: "11px" }}>
             {loading ? "Signing in…" : "Sign in →"}

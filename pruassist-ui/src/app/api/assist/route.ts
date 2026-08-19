@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { currentRep } from "@/lib/auth";
 import { retrieve } from "@/lib/retrieval";
 
 export const runtime = "nodejs";
@@ -9,6 +10,9 @@ export const dynamic = "force-dynamic";
 const MODEL = "gemini-2.5-flash";
 
 export async function POST(req: NextRequest) {
+  // Rep-only: this route spends billed Gemini calls, and the demo is served over a public tunnel.
+  if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ note: "Add GEMINI_API_KEY to .env.local to enable AI pointers." });
@@ -21,6 +25,11 @@ export async function POST(req: NextRequest) {
 
   // 1) RETRIEVE the most relevant Prudential clauses for what was just said.
   const hits = await retrieve(transcript, 3);
+  if (!hits.length) {
+    // Answering with no clause would produce an ungrounded pointer carrying a fabricated-looking
+    // source line — say nothing instead.
+    return NextResponse.json({ note: "No policy clause covers this yet — keep listening, or ask the customer to be more specific." });
+  }
   const context = hits.map((h, i) => `[${i + 1}] (${h.source})\n${h.text}`).join("\n\n");
 
   // 2) GENERATE a structured set of private pointers, grounded in those clauses.

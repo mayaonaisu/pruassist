@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { currentRep } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,6 +9,9 @@ const MODEL = "gemini-2.5-flash";
 
 // Summarises the advisory conversation into a post-session brief for the rep.
 export async function POST(req: NextRequest) {
+  // Rep-only: this route spends billed Gemini calls, and the demo is served over a public tunnel.
+  if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+
   const apiKey = process.env.GEMINI_API_KEY;
   const { transcript } = await req.json().catch(() => ({}));
   const fallback = {

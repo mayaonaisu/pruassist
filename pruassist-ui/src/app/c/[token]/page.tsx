@@ -284,14 +284,14 @@ function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main style={{ display: "grid", placeItems: "center", padding: 28 }}>{children}</main>
+      <main style={{ display: "grid", placeItems: "center", padding: "28px 16px" }}>{children}</main>
     </div>
   );
 }
 
 function Card({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   return (
-    <div className="pru-card" style={{ width: wide ? "min(560px, 94vw)" : "min(480px, 94vw)", marginTop: 24 }}>
+    <div className="pru-card" style={{ width: wide ? "min(560px, 100%)" : "min(480px, 100%)", marginTop: 24 }}>
       {children}
     </div>
   );

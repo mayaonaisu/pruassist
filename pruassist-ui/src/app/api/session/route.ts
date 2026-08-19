@@ -1,25 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { currentRep } from "@/lib/auth";
 import { createSession, getByToken } from "@/lib/sessions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// The customer sees this name on their join link. REP_USERNAME is a login credential, not a
+// name — using it makes the customer's page read "a session with rep", so prefer the name the
+// representative typed as their consent signature.
+function repDisplayName(signature: unknown): string {
+  const typed = typeof signature === "string" ? signature.trim() : "";
+  if (typed.length > 1) return typed.slice(0, 60);
+  return process.env.REP_DISPLAY_NAME?.trim() || "your Prudential representative";
+}
+
 // Rep starts a session (auth required). Returns the room + the private join link.
 export async function POST(req: NextRequest) {
-  const cookieTok = (await cookies()).get(SESSION_COOKIE)?.value;
-  const auth = cookieTok ? await verifySessionToken(cookieTok) : null;
+  const auth = await currentRep();
   if (!auth) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const repName = String(auth.name ?? auth.sub ?? "Representative");
+  const repName = repDisplayName(body.repName);
   const context = {
     productArea: typeof body.productArea === "string" ? body.productArea : "Health Protection",
     focus: Array.isArray(body.focus) ? body.focus.filter((f: unknown) => typeof f === "string") : [],
   };
 
-  const s = createSession(repName, context);
+  const s = await createSession(repName, context);
   return NextResponse.json({ joinToken: s.joinToken, roomId: s.roomId, joinPath: `/c/${s.joinToken}` });
 }
 
@@ -27,7 +34,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
   if (!token) return NextResponse.json({ error: "Missing token." }, { status: 400 });
-  const s = getByToken(token);
+  const s = await getByToken(token);
   if (!s) return NextResponse.json({ error: "This session link is not valid." }, { status: 404 });
   return NextResponse.json({ active: s.active, repName: s.repName, productArea: s.context.productArea });
 }

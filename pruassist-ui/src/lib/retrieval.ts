@@ -1,7 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { KNOWLEDGE, type Clause } from "./knowledge";
 
-const EMBED_MODEL = "text-embedding-004";
+// text-embedding-004 was retired on 2026-01-14 and now 404s. When it did, retrieval degraded
+// silently to keyword matching while the UI kept claiming the answers were semantically grounded
+// — so every embedding failure below is logged rather than swallowed.
+const EMBED_MODEL = "gemini-embedding-001";
 
 export type Hit = Clause & { score: number };
 
@@ -13,37 +16,56 @@ function getClient(): GoogleGenAI | null {
   return client;
 }
 
-async function embed(text: string): Promise<number[] | null> {
+// Asymmetric retrieval: the corpus and the query are embedded for different roles, and using the
+// default task type for both measurably degrades ranking.
+type TaskType = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
+
+async function embedBatch(texts: string[], taskType: TaskType): Promise<(number[] | null)[]> {
   const ai = getClient();
-  if (!ai) return null;
+  if (!ai) return texts.map(() => null);
   try {
-    const res = await ai.models.embedContent({ model: EMBED_MODEL, contents: text });
-    return res.embeddings?.[0]?.values ?? null;
-  } catch {
-    return null;
+    const res = await ai.models.embedContent({ model: EMBED_MODEL, contents: texts, config: { taskType } });
+    return texts.map((_, i) => res.embeddings?.[i]?.values ?? null);
+  } catch (e) {
+    console.error(`[retrieval] ${taskType} embedding failed (model ${EMBED_MODEL}):`, e);
+    return texts.map(() => null);
   }
 }
 
+async function embedQuery(text: string): Promise<number[] | null> {
+  return (await embedBatch([text], "RETRIEVAL_QUERY"))[0];
+}
+
+type Embedded = { clause: Clause; vec: number[] };
+
 // Embed the whole knowledge base once and memoize for the server process.
-let kbPromise: Promise<{ clause: Clause; vec: number[] }[] | null> | null = null;
+let kbPromise: Promise<Embedded[] | null> | null = null;
 function embedKb() {
   if (!kbPromise) {
     kbPromise = (async () => {
-      const results = await Promise.all(
-        KNOWLEDGE.map(async (clause) => {
-          const vec = await embed(`${clause.source}\n${clause.text}`);
-          return vec ? { clause, vec } : null;
-        }),
+      const vecs = await embedBatch(
+        KNOWLEDGE.map((c) => `${c.source}\n${c.text}`),
+        "RETRIEVAL_DOCUMENT",
       );
-      // If any clause failed to embed, signal a fallback to lexical search.
-      return results.every((r) => r !== null) ? (results as { clause: Clause; vec: number[] }[]) : null;
+      // Keep whatever embedded successfully — one bad clause shouldn't drop the other nineteen
+      // back to keyword search.
+      const ok = KNOWLEDGE.map((clause, i) => (vecs[i] ? { clause, vec: vecs[i]! } : null)).filter(
+        (x): x is Embedded => x !== null,
+      );
+      if (ok.length < KNOWLEDGE.length) {
+        console.error(`[retrieval] embedded ${ok.length}/${KNOWLEDGE.length} clauses`);
+      }
+      return ok.length ? ok : null;
     })();
   }
   return kbPromise;
 }
 
 function cosine(a: number[], b: number[]): number {
-  let dot = 0, na = 0, nb = 0;
+  if (a.length !== b.length) return 0;
+  let dot = 0,
+    na = 0,
+    nb = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     na += a[i] * a[i];
@@ -52,43 +74,71 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
 }
 
+// Common words survive a bare length filter and, since the query is a whole transcript chunk,
+// they otherwise dominate the overlap and make every question score alike.
+const STOPWORDS = new Set(
+  ("the and that this with you your for are but not any how have has had was were will would can could should" +
+    " what when which who why does did done from they them their there here about into out off over under" +
+    " than then some most much many more only just also very get got make made take taken been being" +
+    " because while where whom whose our ours yours mine his her its per")
+    .split(" "),
+);
+
 function tokenize(s: string): string[] {
-  return s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2);
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9$ ]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 }
 
-// Keyword-overlap fallback used when embeddings are unavailable.
+// Keyword-overlap fallback used when embeddings are unavailable. Scores by how much of the QUERY
+// a clause covers, not how short the clause is — dividing by clause length just favours the
+// shortest clause and buries the long, specific one that actually answers the question.
 function lexical(query: string, k: number): Hit[] {
   const q = new Set(tokenize(query));
+  if (!q.size) return [];
   return KNOWLEDGE.map((clause) => {
-    const words = tokenize(`${clause.source} ${clause.text}`);
+    const words = new Set(tokenize(`${clause.source} ${clause.text}`));
     let overlap = 0;
-    for (const w of words) if (q.has(w)) overlap++;
-    return { ...clause, score: overlap / (words.length || 1) };
+    for (const w of q) if (words.has(w)) overlap++;
+    return { ...clause, score: overlap / q.size };
   })
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
 }
 
+// Below this a "match" is just incidental similarity. Returning nothing is safer than handing the
+// rep a confident-looking page citation for a clause that doesn't answer the question.
+// Calibrated against this knowledge base: health-protection questions score 0.67-0.75, while
+// off-topic talk (small talk, car insurance) peaks at 0.63.
+const MIN_SCORE = { vector: 0.65, lexical: 0.06 };
+
 // Retrieve the top-k most relevant clauses for a query.
 export async function retrieve(query: string, k = 3): Promise<Hit[]> {
-  let kb: { clause: Clause; vec: number[] }[] | null = null;
+  let kb: Embedded[] | null = null;
   try {
     kb = await embedKb();
-  } catch {
+  } catch (e) {
+    console.error("[retrieval] knowledge base embedding threw:", e);
     kb = null;
   }
 
   if (kb) {
-    const qvec = await embed(query);
+    const qvec = await embedQuery(query);
     if (qvec) {
       return kb
         .map(({ clause, vec }) => ({ ...clause, score: cosine(qvec, vec) }))
         .sort((a, b) => b.score - a.score)
-        .slice(0, k);
+        .slice(0, k)
+        .filter((h) => h.score >= MIN_SCORE.vector);
     }
+    // Only this query failed (a rate limit, say). Keep the cached corpus — discarding it would
+    // re-embed every clause on the next request and amplify the very throttling that caused it.
+    return lexical(query, k).filter((h) => h.score >= MIN_SCORE.lexical);
   }
 
-  // Embeddings unavailable — reset the cache so we can retry later, use lexical now.
+  // The corpus itself failed to embed — allow a retry on the next request.
   kbPromise = null;
-  return lexical(query, k);
+  return lexical(query, k).filter((h) => h.score >= MIN_SCORE.lexical);
 }

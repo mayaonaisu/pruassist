@@ -27,7 +27,9 @@ export async function POST(req: NextRequest) {
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 8,
-    secure: process.env.NODE_ENV === "production",
+    // The demo runs `next dev` behind a public HTTPS tunnel so the customer can join from a
+    // phone, which would otherwise serve a real session cookie over a public URL without Secure.
+    secure: process.env.NODE_ENV === "production" || !!process.env.PUBLIC_TUNNEL,
   });
   return NextResponse.json({ ok: true });
 }

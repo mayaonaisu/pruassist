@@ -12,6 +12,12 @@
 
 export type Clause = { id: string; source: string; text: string };
 
+// The documents the AI can actually cite, derived from the clauses themselves so the UI can never
+// advertise a source the retriever has no clauses from. Sources are "<document> · p.N, p.M".
+export function knowledgeDocuments(): string[] {
+  return [...new Set(KNOWLEDGE.map((c) => c.source.split(" · ")[0]))];
+}
+
 export const KNOWLEDGE: Clause[] = [
   {
     id: "what-is-prushield",

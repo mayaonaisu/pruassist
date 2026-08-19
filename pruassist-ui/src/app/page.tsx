@@ -42,10 +42,10 @@ export default function Home() {
       </header>
 
       {/* ---------- hero: left thesis · right living private channel ---------- */}
-      <section className="pru-container" style={{ padding: "72px 28px 56px", display: "grid", gridTemplateColumns: "1fr 1.04fr", gap: 60, alignItems: "center" }}>
+      <section className="pru-container pru-hero">
         <div>
           <span className="pru-eyebrow pill"><span style={{ width: 6, height: 6, borderRadius: 6, background: "var(--pru)", display: "inline-block" }} /> Private co-pilot for financial representatives</span>
-          <h1 style={{ fontSize: 64, margin: "22px 0 20px", lineHeight: 1.03, letterSpacing: "-0.02em" }}>
+          <h1 style={{ margin: "22px 0 20px", lineHeight: 1.03, letterSpacing: "-0.02em" }}>
             Say the <span className="pru-underline" style={{ fontStyle: "italic", color: "var(--pru)" }}>right thing</span>, exactly when it matters.
           </h1>
           <p style={{ fontSize: 17.5, lineHeight: 1.6, color: "var(--ink-3)", maxWidth: 480 }}>
