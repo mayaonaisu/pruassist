@@ -22,7 +22,7 @@ export default function IntroStep({ repName, onStart }: { repName: string; onSta
   }
 
   return (
-    <div className="pru-container" style={{ maxWidth: 900 }}>
+    <div className="pru-container" style={{ maxWidth: 1120 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 22 }}>
         <div>
           <h1 className="doc-title">Ready when you are</h1>

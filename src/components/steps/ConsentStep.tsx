@@ -66,7 +66,7 @@ export default function ConsentStep({
   }
 
   return (
-    <div className="pru-container" style={{ maxWidth: 940 }}>
+    <div className="pru-container" style={{ maxWidth: 1160 }}>
       <button className="link" onClick={onBack} style={{ marginBottom: 12 }}>
         ← Back
       </button>

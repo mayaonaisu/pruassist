@@ -54,7 +54,7 @@ export default function SummaryStep({
   };
 
   return (
-    <div className="pru-container" style={{ maxWidth: 900 }}>
+    <div className="pru-container" style={{ maxWidth: 1080 }}>
       <div className="brief-head">
         <div>
           <h1 className="doc-title">Advisor brief</h1>

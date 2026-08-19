@@ -186,11 +186,21 @@ button {
 }
 
 /* ============ layout ============ */
+/* Short steps (readiness, brief) sit centred instead of clinging to the top with a void
+   beneath. `margin-block: auto` on the child rather than `justify-content: center`, because
+   the latter clips the top of any step taller than the viewport. */
 .pru-main {
-  padding: 26px 26px 40px;
+  min-height: calc(100dvh - 58px);
+  display: flex;
+  flex-direction: column;
+  padding: clamp(22px, 2.4vh, 34px) clamp(18px, 4vw, 60px) 40px;
+}
+.pru-main > * {
+  width: 100%;
+  margin-block: auto;
 }
 .pru-container {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
 }
 .pru-grid-2 {
@@ -217,13 +227,13 @@ button {
 }
 .doc-title {
   font-family: var(--font-serif);
-  font-size: 25px;
+  font-size: clamp(25px, 2.1vw, 36px);
   font-weight: 600;
   letter-spacing: -0.016em;
   margin-bottom: 5px;
 }
 .doc-sub {
-  font-size: 13.5px;
+  font-size: clamp(13.5px, 0.95vw, 16px);
   color: var(--ink-3);
   line-height: 1.6;
   margin-bottom: 24px;
@@ -454,7 +464,7 @@ button {
 }
 .cam {
   position: relative;
-  width: 226px;
+  width: clamp(226px, 16.5vw, 380px);
   aspect-ratio: 16 / 9;
   border-radius: var(--r-md);
   overflow: hidden;
@@ -606,8 +616,12 @@ button {
   background: var(--card);
   border: 1px solid var(--rule);
   border-radius: var(--r-md);
-  padding: 13px 16px;
-  flex: none;
+  padding: clamp(13px, 1.6vh, 22px) clamp(16px, 1.6vw, 26px);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .lb-head {
   display: flex;
@@ -651,7 +665,7 @@ button {
 }
 .say {
   font-family: var(--font-spoken);
-  font-size: 22px;
+  font-size: clamp(22px, 1.75vw, 32px);
   line-height: 1.4;
   letter-spacing: -0.003em;
   color: var(--ink);
@@ -724,10 +738,10 @@ button {
 /* supporting material + transcript, side by side under the line */
 .c-bot {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 286px;
+  grid-template-columns: minmax(0, 1fr) clamp(260px, 22vw, 380px);
   gap: 13px;
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  height: clamp(190px, 27vh, 320px);
 }
 .pane {
   border: 1px solid var(--rule);
@@ -840,17 +854,17 @@ button {
 
 /* ============ landing ============ */
 .hero {
-  padding: 52px 26px 40px;
+  padding: clamp(40px, 7vh, 84px) clamp(18px, 4vw, 60px) clamp(40px, 6vh, 72px);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 400px;
-  gap: 44px;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 30vw, 520px);
+  gap: clamp(40px, 4.5vw, 76px);
   align-items: start;
-  max-width: 1180px;
+  max-width: min(1440px, 94vw);
   margin: 0 auto;
 }
 .hero h1 {
   font-family: var(--font-serif);
-  font-size: 46px;
+  font-size: clamp(38px, 4vw, 60px);
   line-height: 1.08;
   font-weight: 600;
   letter-spacing: -0.028em;
@@ -861,7 +875,7 @@ button {
   color: var(--pru);
 }
 .hero .lede {
-  font-size: 16px;
+  font-size: clamp(16px, 1.05vw, 19px);
   line-height: 1.65;
   color: var(--ink-2);
   max-width: 44ch;
@@ -936,7 +950,7 @@ button {
 }
 .moment .out .say-l {
   font-family: var(--font-spoken);
-  font-size: 19px;
+  font-size: clamp(19px, 1.3vw, 24px);
   line-height: 1.45;
   color: var(--ink);
 }
@@ -949,17 +963,17 @@ button {
   border-top: 1px solid var(--rule-soft);
 }
 .safe {
-  padding: 34px 26px 44px;
+  padding: clamp(34px, 5vh, 60px) clamp(18px, 4vw, 60px) clamp(44px, 6vh, 72px);
   border-top: 1px solid var(--rule);
   background: var(--brochure-2);
 }
 .safe-in {
-  max-width: 1180px;
+  max-width: min(1440px, 94vw);
   margin: 0 auto;
 }
 .safe h2 {
   font-family: var(--font-serif);
-  font-size: 20px;
+  font-size: clamp(20px, 1.6vw, 27px);
   font-weight: 600;
   letter-spacing: -0.012em;
   margin-bottom: 18px;
@@ -986,7 +1000,7 @@ button {
 /* the configuration reads as a sentence the rep would actually say */
 .sentence {
   font-family: var(--font-spoken);
-  font-size: 21px;
+  font-size: clamp(21px, 1.65vw, 29px);
   line-height: 1.75;
   color: var(--ink-2);
   max-width: 62ch;
@@ -1109,11 +1123,11 @@ button {
 /* stats set inside a sentence — the form the rep repeats to a supervisor */
 .stat-sentence {
   font-family: var(--font-spoken);
-  font-size: 19px;
+  font-size: clamp(19px, 1.45vw, 26px);
   line-height: 1.8;
   color: var(--ink-2);
-  max-width: 64ch;
-  margin-bottom: 26px;
+  max-width: 62ch;
+  margin-bottom: clamp(26px, 3.5vh, 40px);
 }
 .stat-sentence b {
   font-family: var(--font-mono);
@@ -1146,9 +1160,9 @@ button {
 
 /* ============ customer join ============ */
 .cust-wrap {
-  max-width: 520px;
+  max-width: 580px;
   margin: 0 auto;
-  padding: 40px 26px 60px;
+  padding: clamp(40px, 8vh, 90px) 26px 60px;
 }
 .cust-card {
   background: var(--card);
