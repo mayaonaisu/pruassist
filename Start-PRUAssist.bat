@@ -4,7 +4,7 @@ echo ============================================
 echo    Starting PRUAssist...
 echo ============================================
 echo.
-echo  One-time setup first (see SETUP.md):
+echo  One-time setup first (see README.md):
 echo    - Node.js installed
 echo    - ngrok installed + your authtoken set:  ngrok config add-authtoken YOUR_TOKEN
 echo    - .env.local in place

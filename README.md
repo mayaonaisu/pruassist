@@ -1,122 +1,111 @@
 # PRUAssist
 
-AI co-pilot for Prudential financial representatives — a private assistant that listens to a live, **consented** advisory meeting, detects customer confusion, and surfaces **policy-grounded** talking points to the representative in real time. It supports the representative only: the customer never interacts with the AI, and it never makes the recommendation.
+AI co-pilot for Prudential financial representatives — a private assistant that listens to a live, **consented** advisory meeting, catches the moment the customer stops following, and hands the representative one **policy-grounded** line to say, with the brochure page it came from.
+
+It supports the representative only. The customer never interacts with the AI, never sees the prompts, and the representative makes every recommendation.
 
 Built for the **PolyFinTech API100 Hackathon 2026** (Prudential "Insurance Navigator" challenge).
 
-**Stack:** Next.js 16 · TypeScript · React 19 · LiveKit (video) · Google Gemini (talking points + embeddings) · browser Web Speech API (transcription).
+**Live:** https://pruassist.vercel.app
 
-> **Setting up on a brand-new computer?** Follow **[SETUP.md](SETUP.md)** — a full, from-scratch walkthrough. The section below is the short version for a machine that already has Node.js.
-
-## Quick start
-
-```bash
-git clone https://github.com/mayaonaisu/pruassist.git
-cd pruassist
-npm install
-```
-
-Create your local environment file from the template and fill in your own keys:
-
-```bash
-# Windows PowerShell
-Copy-Item .env.example .env.local
-# macOS / Linux / Git Bash
-cp .env.example .env.local
-```
-
-Then run it:
-
-```bash
-npm run dev
-```
-
-Open **http://localhost:3000**, then sign in at **/login** with the `REP_USERNAME` / `REP_PASSWORD` you set in `.env.local`. Full variable list + where to get each value: [`.env.example`](.env.example) (see also [SETUP.md](SETUP.md)).
+**Stack:** Next.js 16 · React 19 · TypeScript · LiveKit (video) · Google Gemini (talking points + embeddings) · Upstash Redis (session state) · browser Web Speech API (transcription)
 
 ---
 
 ## How it works
 
-1. **Rep signs in** (`/login`) → lands on the console (`/rep`) → confirms consent, sets the meeting focus, and **starts a session**.
-2. The rep gets a **private link** to send the customer. The customer opens it, **consents to recording**, and joins the video call — seeing **video only**, never the AI or transcript.
-3. Each browser transcribes its own microphone with the **Web Speech API**. The customer's words are sent **privately to the rep** over LiveKit's data channel.
-4. When the customer asks something, PRUAssist **retrieves the relevant policy clauses** (Gemini embeddings + cosine similarity over the knowledge base) and has **Gemini** generate concise, **grounded** talking points — shown privately to the rep, each with its source.
-5. On end, the transcript is summarised into a **post-session brief** (concerns, points covered, follow-ups).
+1. **The rep signs in** at `/login`, lands on the console at `/rep`, confirms consent, sets the meeting focus, and starts a session.
+2. They send the customer a **private link**. The customer opens it, consents to recording, and joins the video call — seeing **video only**, never the AI or the transcript.
+3. Each browser transcribes its **own** microphone with the Web Speech API. The customer's words travel privately to the rep over LiveKit's data channel.
+4. When the customer asks something, PRUAssist retrieves the relevant policy clauses and Gemini writes **one line to say**, grounded in those clauses and shown with its page citation — privately, on the rep's screen.
+5. On ending the session, the transcript is summarised into an **advisor brief**: what the customer raised, what was answered, and what is still open.
 
-## App structure (routes)
+## Routes
 
 | Route | Who | What |
 |-------|-----|------|
-| `/` | anyone | Marketing landing → "Representative sign in" |
-| `/login` | rep | Sign in — sets a signed, httpOnly session cookie |
-| `/rep` | rep (protected) | The console: Intro launchpad → Consent & context → Live session → Summary. Redirects to `/login` if not signed in. |
+| `/` | anyone | Landing page → "Representative sign in" |
+| `/login` | rep | Sign in — sets a signed, httpOnly session cookie (8-hour expiry) |
+| `/rep` | rep (protected) | The console: Ready → Consent → Live → Brief. Redirects to `/login` when signed out. |
 | `/c/[token]` | customer | Private per-session link: consent → camera/mic preview → **video-only** call |
 
-## The two sides
+---
 
-**Representative** — signs in, controls the whole session, sees video + live transcript + the private co-pilot pointers, and copies the customer's private link. Makes every recommendation; PRUAssist only offers words to use, rephrase, or ignore.
+## Setting it up
 
-**Customer** — opens their private link, consents to recording, joins a normal video call. Sees only video and their own mic/camera controls. Never sees the transcript or the AI.
+You need three free accounts: **Upstash** (session store), **Vercel** (hosting), and **Google AI Studio** (Gemini). LiveKit Cloud has a free tier for the video.
 
-## Transcription (free, no extra service)
+### 1. Create the Redis database
 
-Each browser runs the built-in **Web Speech API** on its *own* microphone:
+Sign up at **https://console.upstash.com**, create a database (pick the region closest to you — `ap-southeast-1` for Singapore), then open the **REST API** section and copy `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
 
-- The **rep's** speech is transcribed locally and shown in the rep panel.
-- The **customer's** speech is transcribed in the customer's browser and sent **privately to the rep** over LiveKit's data channel — the customer never sees a transcript.
+**This is not optional.** Vercel runs each API route as a serverless function, and separate invocations can land on different instances that share no memory. Kept in process memory, a session created by the rep would be invisible to the customer's request — so join links would fail *sometimes*, which is far harder to spot than failing always. `src/lib/store.ts` uses Redis when it's configured and process memory when it isn't.
 
-Works in **Chrome / Edge** (which back the Web Speech API). For production-grade, server-side transcription of both parties, swap this for a LiveKit Agent + Amazon Transcribe / Deepgram.
+Each session writes three keys (`sess:room:*`, `sess:tok:*`, `consent:*`), all expiring after 24 hours, so the database never fills up.
 
-## AI talking points (RAG, grounded)
+### 2. Import the repo into Vercel
 
-The co-pilot's suggestions come from `/api/assist`, using **Google Gemini** via `@google/genai`:
+Sign up at **https://vercel.com** with your GitHub account, then **Add New → Project** and import this repository.
 
-- The knowledge base ([`src/lib/knowledge.ts`](src/lib/knowledge.ts)) holds PRUShield + PRUExtra clauses, each with a brochure **page citation**.
-- On a customer question, the recent transcript is embedded (`text-embedding-004`) and matched to the closest clauses by cosine similarity.
-- Gemini (`gemini-2.5-flash`) then writes concise talking points **grounded** in those clauses, returned with their sources. Change the model in [`src/app/api/assist/route.ts`](src/app/api/assist/route.ts).
+Leave **Root Directory** at its default — the Next.js app sits at the repo root, and `vercel.json` pins the framework preset, so no build configuration is needed.
 
-Requires `GEMINI_API_KEY`; without it the co-pilot panel stays dormant.
+### 3. Add the environment variables
 
-## Video (LiveKit)
-
-Video runs on **LiveKit Cloud** (free tier). A server-side token route ([`src/app/api/token/route.ts`](src/app/api/token/route.ts)) mints access tokens so the API secret never reaches the browser — only the `wss://` URL is public, which is expected. Create a project at **https://cloud.livekit.io** → **Settings → Keys** to get the three values below.
-
-## Environment variables
-
-Copy `.env.example` → `.env.local` and fill in:
+Add these under **Settings → Environment Variables** before the first deploy, selecting all three environments (Production, Preview, Development):
 
 | Variable | Where to get it |
 |----------|-----------------|
-| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | LiveKit Cloud → Settings → Keys |
-| `NEXT_PUBLIC_LIVEKIT_URL` | The `wss://…livekit.cloud` URL of your LiveKit project |
+| `LIVEKIT_API_KEY` | LiveKit Cloud → Settings → Keys |
+| `LIVEKIT_API_SECRET` | LiveKit Cloud → Settings → Keys |
+| `NEXT_PUBLIC_LIVEKIT_URL` | The `wss://….livekit.cloud` URL of your LiveKit project |
 | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
-| `REP_USERNAME` / `REP_PASSWORD` | You choose these (the rep sign-in) |
-| `AUTH_SECRET` | Any long random string — e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `UPSTASH_REDIS_REST_URL` | Upstash → your database → REST API |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash → your database → REST API |
+| `REP_USERNAME` | You choose it — the rep sign-in |
+| `REP_PASSWORD` | You choose it — **use a strong one, the URL is public** |
+| `AUTH_SECRET` | At least 32 characters: `openssl rand -hex 32` |
+| `REP_DISPLAY_NAME` | *(optional)* fallback name the customer sees if the rep leaves the consent signature blank |
 
-`.env.local` is **gitignored** — never commit it. Changing it requires a dev-server restart.
+`AUTH_SECRET` shorter than 32 characters is rejected at startup and every sign-in will fail until it's long enough.
 
-## Cross-device demo (optional)
+Then hit **Deploy**.
 
-To let a customer join from a phone or a second laptop, expose the local server over **HTTPS** with a tunnel (e.g. **ngrok**) — browsers require HTTPS for camera/mic on anything but `localhost`. `next.config.ts` already allow-lists common tunnel domains. **Open the app at the tunnel URL (not `localhost`)** so the customer link you copy is shareable (it is built from `window.location.origin`). See [SETUP.md](SETUP.md) for the ngrok steps.
+### 4. Check it works
 
-## Test it locally (two tabs, one laptop)
+1. The root URL loads the landing page.
+2. `/login` accepts your credentials.
+3. Start a session and **open the customer link on a different device**. This is the check that matters — it is what proves the shared store is working, and testing in the same browser can pass while it is still broken. If it says *"This session link is not valid"*, the two `UPSTASH_*` variables are missing or scoped to the wrong environment.
+4. Allow the microphone when prompted; the control on your own camera tile should not show a blocked state.
 
-1. `npm run dev`
-2. **Rep tab:** http://localhost:3000/login → sign in → start a session → copy the customer link.
-3. **Customer tab:** paste the link → **I consent** → enter a name → Join.
-4. Talk in both tabs: the rep panel shows a live, speaker-labelled transcript; when the customer asks a question, grounded pointers appear (needs `GEMINI_API_KEY`).
-5. Confirm the customer tab shows **only** video — no transcript, no AI.
+---
 
-> Two tabs on one laptop is the easiest test — the two mics are separate tabs, so both sides of the transcript appear for the rep. Chrome lets multiple tabs share one webcam.
+## How the AI works
 
-## Notes & caveats
+Suggestions come from `/api/assist`, which is **retrieval-first** — the model only ever writes from clauses that were actually retrieved:
 
-- **In-memory state.** Session and consent are held in memory and **reset on server restart** — fine for a demo; production would move these to a database.
-- **Demo-grade auth.** A single shared rep credential. For real use, add a user store with hashed passwords.
-- **Grounding disclaimer.** `knowledge.ts` is grounded in Prudential's **public PRUShield brochure** with page citations. Re-verify figures against the latest brochure and policy documents before any real advisory use — the brochure is "for reference only and is not a contract of insurance."
-- **Privacy of speech.** The Web Speech API sends audio to the browser's speech service (Google, in Chrome). The consent copy covers recording/transcription; an on-device path (e.g. faster-whisper) would remove that.
-- **One-click launcher (Windows).** After the one-time setup, double-click `Start-PRUAssist.bat` to start the dev server + ngrok tunnel and open the public URL for you — it uses whatever Node/ngrok are on your PATH (see [SETUP.md](SETUP.md)).
+- The knowledge base ([`src/lib/knowledge.ts`](src/lib/knowledge.ts)) holds 20 PRUShield / PRUExtra clauses, each carrying a brochure page citation.
+- The recent transcript is embedded with **`gemini-embedding-001`** and matched to the closest clauses by cosine similarity, with the corpus and the query embedded for different task types (asymmetric retrieval ranks measurably better than using the default for both).
+- A calibrated relevance floor means off-topic conversation returns **nothing** rather than a confident answer citing a real page number.
+- **`gemini-2.5-flash`** then writes the line, grounded in those clauses and returned with their sources. Change the model in [`src/app/api/assist/route.ts`](src/app/api/assist/route.ts).
 
-## Further docs
+Both `/api/assist` and `/api/summary` require a signed-in rep — they spend billed API calls, so they are not open to the public URL.
 
-- **[SETUP.md](SETUP.md)** — brand-new-computer setup, step by step.
+Without `GEMINI_API_KEY` the co-pilot stays dormant and the rest of the app still works.
+
+## Video and transcription
+
+Video runs on **LiveKit Cloud**. A server-side route ([`src/app/api/token/route.ts`](src/app/api/token/route.ts)) mints access tokens so the API secret never reaches the browser — only the `wss://` URL is public, which is expected. Create a project at **https://cloud.livekit.io** → **Settings → Keys**.
+
+Transcription needs no extra service: each browser runs the built-in **Web Speech API** on its own microphone. The rep's speech is transcribed locally; the customer's is transcribed in their browser and sent privately to the rep. This works in **Chrome and Edge**. For production-grade server-side transcription of both parties, swap it for a LiveKit Agent with Amazon Transcribe or Deepgram.
+
+## Design
+
+The interface is one warm paper world — a marked-up policy brochure. Typography carries meaning rather than decoration: **Newsreader** is used only for the human voice (the line to say, the customer's own words, a signed name), **Geist Mono** only for citations, timestamps and measured values, **Fraunces** only for document titles, and **Inter** for everything else. A highlighter marks one thing and one thing only — where the customer lost the thread.
+
+## Notes and caveats
+
+- **Demo-grade auth.** One shared credential for the representative, compared in plaintext against the environment variables. There is no rate limiting on `/api/login`, and signing out cannot revoke an already-issued token before its 8-hour expiry. Real use needs a user store with hashed passwords.
+- **Grounding disclaimer.** The knowledge base is grounded in Prudential's **public PRUShield brochure** (April 2026) with page citations. Re-verify every figure against the latest brochure and the policy documents before any real advisory use — the brochure itself states it is "for reference only and is not a contract of insurance."
+- **Privacy of speech.** The Web Speech API sends audio to the browser's speech service (Google, in Chrome). The consent copy covers recording and transcription; an on-device path such as faster-whisper would remove that dependency.
+- **Sessions expire after 24 hours** and transcripts are never persisted — the brief is generated in the browser and discarded when the rep leaves the page.
+- **Vercel's Hobby plan is non-commercial.** Fine for a hackathon; a commercial deployment needs Pro.
