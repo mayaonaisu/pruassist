@@ -35,3 +35,11 @@ Thumbs.db
 # === AI-agent instructions (kept locally, not published) ===
 **/AGENTS.md
 **/CLAUDE.md
+
+# === Next.js / Vercel specifics ===
+.vercel
+next-env.d.ts
+/coverage
+*.pem
+.pnp
+.pnp.*

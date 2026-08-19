@@ -42,16 +42,16 @@ This downloads everything you need. (`node_modules`, `.next`, and `.env.local` a
 
 If you can't use Git, copy the whole project folder from another machine via a USB drive, OneDrive/Google Drive, or a zip. To keep it small and clean, **don't copy** these (they are regenerated or secret):
 
-- `pruassist-ui/node_modules/` — large; recreated by `npm install`
-- `pruassist-ui/.next/` — build cache; regenerated automatically
-- `pruassist-ui/.env.local` — your secrets; recreate it in step 4
+- `node_modules/` — large; recreated by `npm install`
+- `.next/` — build cache; regenerated automatically
+- `.env.local` — your secrets; recreate it in step 4
 
 ## 3. Install dependencies
 
-From the project folder you just cloned/copied, go into the web app and install:
+From the project folder you just cloned/copied, install the dependencies:
 
 ```
-cd pruassist-ui
+cd pruassist
 npm install
 ```
 
@@ -59,9 +59,9 @@ This reads `package.json` and downloads everything into a fresh `node_modules/` 
 
 ## 4. Create your environment file
 
-The app needs API keys and a login, kept in `pruassist-ui/.env.local` — which is **gitignored; never commit or share it publicly**.
+The app needs API keys and a login, kept in `.env.local` — which is **gitignored; never commit or share it publicly**.
 
-> **Were you sent a ready-made `.env.local`?** Just drop it into the `pruassist-ui/` folder and skip to **step 5** — it already has working keys, so you don't need your own LiveKit/Gemini accounts. Keep it private (don't commit or post it anywhere public).
+> **Were you sent a ready-made `.env.local`?** Just drop it into the project folder and skip to **step 5** — it already has working keys, so you don't need your own LiveKit/Gemini accounts. Keep it private (don't commit or post it anywhere public).
 
 Otherwise, copy the template:
 
@@ -173,4 +173,4 @@ Use **Chrome or Edge** — the Web Speech API isn't available in Safari / Firefo
 Stop (`Ctrl+C`) and re-run `npm run dev` — environment variables load only at startup.
 
 **`npm install` fails.**
-Make sure `node -v` is v20+. Delete `pruassist-ui/node_modules` and `package-lock.json` and run `npm install` again.
+Make sure `node -v` is v20+. Delete `node_modules` and `package-lock.json` and run `npm install` again.

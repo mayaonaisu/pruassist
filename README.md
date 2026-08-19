@@ -4,7 +4,7 @@ AI co-pilot for Prudential financial representatives — a private assistant tha
 
 Built for the **PolyFinTech API100 Hackathon 2026** (Prudential "Insurance Navigator" challenge).
 
-**Stack:** Next.js 16 · TypeScript · React 19 · LiveKit (video) · Google Gemini (talking points + embeddings) · browser Web Speech API (transcription). The web app lives in [`pruassist-ui/`](pruassist-ui/).
+**Stack:** Next.js 16 · TypeScript · React 19 · LiveKit (video) · Google Gemini (talking points + embeddings) · browser Web Speech API (transcription).
 
 > **Setting up on a brand-new computer?** Follow **[SETUP.md](SETUP.md)** — a full, from-scratch walkthrough. The section below is the short version for a machine that already has Node.js.
 
@@ -12,7 +12,7 @@ Built for the **PolyFinTech API100 Hackathon 2026** (Prudential "Insurance Navig
 
 ```bash
 git clone https://github.com/mayaonaisu/pruassist.git
-cd pruassist/pruassist-ui
+cd pruassist
 npm install
 ```
 
@@ -31,7 +31,7 @@ Then run it:
 npm run dev
 ```
 
-Open **http://localhost:3000**, then sign in at **/login** with the `REP_USERNAME` / `REP_PASSWORD` you set in `.env.local`. Full variable list + where to get each value: [`pruassist-ui/.env.example`](pruassist-ui/.env.example) (see also [SETUP.md](SETUP.md)).
+Open **http://localhost:3000**, then sign in at **/login** with the `REP_USERNAME` / `REP_PASSWORD` you set in `.env.local`. Full variable list + where to get each value: [`.env.example`](.env.example) (see also [SETUP.md](SETUP.md)).
 
 ---
 
@@ -71,19 +71,19 @@ Works in **Chrome / Edge** (which back the Web Speech API). For production-grade
 
 The co-pilot's suggestions come from `/api/assist`, using **Google Gemini** via `@google/genai`:
 
-- The knowledge base ([`src/lib/knowledge.ts`](pruassist-ui/src/lib/knowledge.ts)) holds PRUShield + PRUExtra clauses, each with a brochure **page citation**.
+- The knowledge base ([`src/lib/knowledge.ts`](src/lib/knowledge.ts)) holds PRUShield + PRUExtra clauses, each with a brochure **page citation**.
 - On a customer question, the recent transcript is embedded (`text-embedding-004`) and matched to the closest clauses by cosine similarity.
-- Gemini (`gemini-2.5-flash`) then writes concise talking points **grounded** in those clauses, returned with their sources. Change the model in [`src/app/api/assist/route.ts`](pruassist-ui/src/app/api/assist/route.ts).
+- Gemini (`gemini-2.5-flash`) then writes concise talking points **grounded** in those clauses, returned with their sources. Change the model in [`src/app/api/assist/route.ts`](src/app/api/assist/route.ts).
 
 Requires `GEMINI_API_KEY`; without it the co-pilot panel stays dormant.
 
 ## Video (LiveKit)
 
-Video runs on **LiveKit Cloud** (free tier). A server-side token route ([`src/app/api/token/route.ts`](pruassist-ui/src/app/api/token/route.ts)) mints access tokens so the API secret never reaches the browser — only the `wss://` URL is public, which is expected. Create a project at **https://cloud.livekit.io** → **Settings → Keys** to get the three values below.
+Video runs on **LiveKit Cloud** (free tier). A server-side token route ([`src/app/api/token/route.ts`](src/app/api/token/route.ts)) mints access tokens so the API secret never reaches the browser — only the `wss://` URL is public, which is expected. Create a project at **https://cloud.livekit.io** → **Settings → Keys** to get the three values below.
 
 ## Environment variables
 
-Copy `pruassist-ui/.env.example` → `pruassist-ui/.env.local` and fill in:
+Copy `.env.example` → `.env.local` and fill in:
 
 | Variable | Where to get it |
 |----------|-----------------|
@@ -97,7 +97,7 @@ Copy `pruassist-ui/.env.example` → `pruassist-ui/.env.local` and fill in:
 
 ## Cross-device demo (optional)
 
-To let a customer join from a phone or a second laptop, expose the local server over **HTTPS** with a tunnel (e.g. **ngrok**) — browsers require HTTPS for camera/mic on anything but `localhost`. `pruassist-ui/next.config.ts` already allow-lists common tunnel domains. **Open the app at the tunnel URL (not `localhost`)** so the customer link you copy is shareable (it is built from `window.location.origin`). See [SETUP.md](SETUP.md) for the ngrok steps.
+To let a customer join from a phone or a second laptop, expose the local server over **HTTPS** with a tunnel (e.g. **ngrok**) — browsers require HTTPS for camera/mic on anything but `localhost`. `next.config.ts` already allow-lists common tunnel domains. **Open the app at the tunnel URL (not `localhost`)** so the customer link you copy is shareable (it is built from `window.location.origin`). See [SETUP.md](SETUP.md) for the ngrok steps.
 
 ## Test it locally (two tabs, one laptop)
 

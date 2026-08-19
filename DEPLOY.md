@@ -25,7 +25,7 @@ when it isn't. Local `npm run dev` needs no setup; a deployed instance needs Red
 ## Step 1 — Redis database ✅ done
 
 The Upstash database is already created and verified working. Its two REST credentials are in
-`pruassist-ui/.env.local` (gitignored) and are needed again in step 3.
+`.env.local` (gitignored) and are needed again in step 3.
 
 Verified end to end: a session written by one process was read back by a *separate* process — the
 same condition serverless creates. Each session writes exactly three keys
@@ -38,8 +38,8 @@ fills up.
 
 1. Sign up at **https://vercel.com** with your GitHub account.
 2. **Add New → Project**, then import `mayaonaisu/pruassist`.
-3. Set **Root Directory** to `pruassist-ui`. This matters — the Next.js app is not at the repo
-   root, and the build fails without it.
+3. Leave **Root Directory** at its default. The Next.js app sits at the repo root, so Vercel
+   detects it with no configuration.
 4. Leave the framework preset as Next.js and the build settings at their defaults.
 
 ---

@@ -7,7 +7,7 @@ echo.
 echo  One-time setup first (see SETUP.md):
 echo    - Node.js installed
 echo    - ngrok installed + your authtoken set:  ngrok config add-authtoken YOUR_TOKEN
-echo    - pruassist-ui\.env.local in place
+echo    - .env.local in place
 echo.
 
 REM Optional: your OWN reserved ngrok domain (leave blank to get a random URL each run).
@@ -18,8 +18,8 @@ REM Portable copies of Node/ngrok often live under %LOCALAPPDATA%\Programs — a
 REM PATH so they're found. (Harmless if you installed them normally: missing folders are skipped.)
 set "PATH=%LOCALAPPDATA%\Programs\nodejs;%LOCALAPPDATA%\Programs\ngrok;%PATH%"
 
-REM Run from the web-app folder (this .bat sits one level above it)
-cd /d "%~dp0pruassist-ui"
+REM Run from the project folder (this .bat sits alongside package.json)
+cd /d "%~dp0"
 
 REM First run only: install dependencies if they're missing
 if not exist "node_modules\" (
