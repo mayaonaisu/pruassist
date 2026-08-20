@@ -1,0 +1,22 @@
+{
+  "name": "Panel provider misconception",
+  "productArea": "Health Protection",
+  "expect": "panel-providers:misunderstood",
+  "turns": [
+    {
+      "t": "00:24",
+      "role": "rep",
+      "text": "The other thing worth understanding is the panel. Using a panel or Extended Panel provider is what unlocks the deductible coverage and the stop-loss cap; at a non-panel provider the deductible is not covered and stop-loss does not apply."
+    },
+    {
+      "t": "00:31",
+      "role": "customer",
+      "text": "So any hospital is fine then, the coverage is the same wherever I go."
+    },
+    {
+      "t": "00:36",
+      "role": "rep",
+      "text": "Let me come back to that in a moment."
+    }
+  ]
+}

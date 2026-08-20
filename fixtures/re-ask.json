@@ -1,0 +1,32 @@
+{
+  "name": "The same question, asked twice",
+  "productArea": "Health Protection",
+  "expect": "stop-loss:asserted",
+  "turns": [
+    {
+      "t": "00:09",
+      "role": "customer",
+      "text": "What is the most I would have to pay in a really bad year?"
+    },
+    {
+      "t": "00:32",
+      "role": "rep",
+      "text": "That is the stop-loss. It caps your out-of-pocket co-insurance at S$6,000 in a policy year, as long as you are with a panel provider or it is an emergency. It does not include the deductible."
+    },
+    {
+      "t": "00:36",
+      "role": "customer",
+      "text": "Okay."
+    },
+    {
+      "t": "00:41",
+      "role": "rep",
+      "text": "And the deductible sits outside that cap."
+    },
+    {
+      "t": "01:04",
+      "role": "customer",
+      "text": "Sorry, what is the most I would have to pay in a really bad year?"
+    }
+  ]
+}

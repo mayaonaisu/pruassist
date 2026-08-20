@@ -1,0 +1,17 @@
+{
+  "name": "The happy path — the customer demonstrates it",
+  "productArea": "Health Protection",
+  "expect": "deductible-definition:demonstrated",
+  "turns": [
+    {
+      "t": "00:14",
+      "role": "rep",
+      "text": "The deductible is the amount you pay yourself first, once per policy year, before MediShield Life or PRUShield pays anything."
+    },
+    {
+      "t": "00:22",
+      "role": "customer",
+      "text": "So I pay the first chunk myself each year, and only after that does the insurance start paying anything."
+    }
+  ]
+}

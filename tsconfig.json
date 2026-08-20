@@ -11,6 +11,9 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // The replay harness runs straight from source, so it imports with real .ts specifiers.
+    // Safe here because noEmit is true — nothing is written that would carry the extension.
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "incremental": true,
     "plugins": [

@@ -20,6 +20,20 @@ export function productAreas(): string[] {
   return [...new Set(knowledgeDocuments().map((d) => DOCUMENT_AREA[d]).filter(Boolean))];
 }
 
+// The advisory area a clause belongs to, so retrieval can be scoped to the session's product.
+export function areaOfClause(clause: Clause): string | undefined {
+  return DOCUMENT_AREA[clause.source.split(" · ")[0]];
+}
+
+// Clause lookup by id — the concept ledger anchors to ids, so it must resolve them cheaply.
+// Built on first call: KNOWLEDGE is declared below and would be in the temporal dead zone here.
+let byId: Map<string, Clause> | null = null;
+
+export function clauseById(id: string): Clause | undefined {
+  if (!byId) byId = new Map(KNOWLEDGE.map((c) => [c.id, c]));
+  return byId.get(id);
+}
+
 // One row per document with the clause count and page span the retriever can cite.
 export type DocumentIndex = { doc: string; clauses: number; pages: string };
 

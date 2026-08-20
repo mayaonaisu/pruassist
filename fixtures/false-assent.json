@@ -1,0 +1,13 @@
+{
+  "name": "False assent on the deductible",
+  "productArea": "Health Protection",
+  "expect": "deductible-definition:asserted",
+  "note": "t is when the browser finalised the line, which is what the live transcript gives us.",
+  "turns": [
+    { "t": "00:38", "role": "rep", "text": "So before we look at the plans, the piece everyone trips over is the deductible. That is the amount you pay yourself first, once per policy year, before MediShield Life or PRUShield pays anything at all." },
+    { "t": "00:43", "role": "customer", "text": "Okay, yeah, that makes sense." },
+    { "t": "00:49", "role": "rep", "text": "Good. After that there is co-insurance, which is ten percent of the claimable amount." },
+    { "t": "00:51", "role": "customer", "text": "Right, okay." },
+    { "t": "01:05", "role": "customer", "text": "Sorry, can I just check — how much would I actually have to pay upfront on the day?" }
+  ]
+}

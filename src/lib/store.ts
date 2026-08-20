@@ -4,6 +4,11 @@ import { Redis } from "@upstash/redis";
 export interface Store {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T, ttlSeconds?: number): Promise<void>;
+  del(key: string): Promise<void>;
+  // Append-only queue. Two writers on one key lose updates under read-modify-write, so rep
+  // actions go to their own list and the deep pass drains it — never a shared get/set.
+  append<T>(key: string, value: T, ttlSeconds?: number): Promise<void>;
+  drain<T>(key: string): Promise<T[]>;
 }
 
 // Advisory sessions are short-lived; expiring them keeps the store from growing forever.
@@ -29,6 +34,21 @@ class MemoryStore implements Store {
   async set<T>(key: string, value: T, ttlSeconds = DEFAULT_TTL): Promise<void> {
     memory.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
   }
+
+  async del(key: string): Promise<void> {
+    memory.delete(key);
+  }
+
+  async append<T>(key: string, value: T, ttlSeconds = DEFAULT_TTL): Promise<void> {
+    const existing = (await this.get<T[]>(key)) ?? [];
+    await this.set(key, [...existing, value], ttlSeconds);
+  }
+
+  async drain<T>(key: string): Promise<T[]> {
+    const items = (await this.get<T[]>(key)) ?? [];
+    if (items.length) memory.delete(key);
+    return items;
+  }
 }
 
 class RedisStore implements Store {
@@ -40,6 +60,23 @@ class RedisStore implements Store {
 
   async set<T>(key: string, value: T, ttlSeconds = DEFAULT_TTL): Promise<void> {
     await this.redis.set(key, value, { ex: ttlSeconds });
+  }
+
+  async del(key: string): Promise<void> {
+    await this.redis.del(key);
+  }
+
+  // RPUSH takes no read, so concurrent writers cannot clobber each other.
+  async append<T>(key: string, value: T, ttlSeconds = DEFAULT_TTL): Promise<void> {
+    await this.redis.rpush<T>(key, value);
+    await this.redis.expire(key, ttlSeconds);
+  }
+
+  // LPOP with a count removes exactly what it returns, so an append landing mid-drain survives
+  // to the next pass instead of being deleted unread.
+  async drain<T>(key: string): Promise<T[]> {
+    const items = await this.redis.lpop<T[]>(key, 100);
+    return Array.isArray(items) ? items : [];
   }
 }
 

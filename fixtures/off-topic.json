@@ -1,0 +1,32 @@
+{
+  "name": "Small talk — the assistant should stay silent",
+  "productArea": "Health Protection",
+  "expect": "none:silent",
+  "turns": [
+    {
+      "t": "00:08",
+      "role": "rep",
+      "text": "Thanks for making the time this morning, I know the school run is not kind at this hour."
+    },
+    {
+      "t": "00:13",
+      "role": "customer",
+      "text": "No problem at all, we got out of the house early for once."
+    },
+    {
+      "t": "00:16",
+      "role": "rep",
+      "text": "How was the drive over?"
+    },
+    {
+      "t": "00:20",
+      "role": "customer",
+      "text": "Fine, the rain held off until we parked."
+    },
+    {
+      "t": "00:26",
+      "role": "customer",
+      "text": "Did you manage to catch the match last night?"
+    }
+  ]
+}
