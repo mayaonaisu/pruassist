@@ -1,12 +1,12 @@
 import { citationsFor, conceptById, conceptsForArea, type Concept } from "../concepts";
 import { DEFAULT_TTL, getStore } from "../store";
-import type { Detection } from "./signals";
 import {
   emptyState,
   type AgentState,
   type Alert,
   type ConceptEntry,
   type ConceptState,
+  type Detection,
   type Evidence,
   type RecordRow,
   type RepAct,

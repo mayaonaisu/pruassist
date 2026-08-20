@@ -2,8 +2,8 @@ import { Type } from "@google/genai";
 import { clausesFor, conceptById, type Concept } from "../concepts";
 import { callWithRetry, getAi, MODEL, thinking } from "./gemini";
 import { clauseBlock, HOUSE_RULES } from "./prompts";
-import { normaliseQuote, type Detection } from "./signals";
-import type { AgentState, Turn } from "./types";
+import { normaliseQuote } from "./utterance";
+import type { AgentState, Detection, Turn } from "./types";
 
 // Signal 5 — the explain-back grade. The rep asks the teach-back question; whatever the customer
 // says next gets graded against the clause, and the grade names *which part* was wrong rather than

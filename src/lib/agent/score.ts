@@ -1,8 +1,8 @@
 import type { Concept } from "../concepts";
 import { gradeTeachBacks } from "./judge";
 import { applyDetections, chooseAlert, sameAlert } from "./ledger";
-import { runSignals, type Detection } from "./signals";
-import type { AgentState, Turn } from "./types";
+import { runSignals } from "./signals";
+import type { AgentState, Detection, Turn } from "./types";
 
 // The scoring half of the deep pass: turns in, a folded ledger out. No store, no scheduling, no
 // speculative work — everything in here is a pure function of the state and the turns it is given.

@@ -18,6 +18,23 @@ export type ConceptState =
 
 export type SignalKind = "uptake" | "assent" | "divergence" | "re-ask" | "explain-back" | "latency";
 
+// What one detector observed about one turn. A detector never decides a state on its own; it
+// argues for one, and the ledger applies precedence. `argues: null` is evidence only.
+//
+// This is the currency of the whole signal system — the detectors mint it, the grader mints it,
+// the ledger folds it — so it lives here with the other shared shapes rather than inside any one
+// of them.
+export type Detection = {
+  conceptId: string;
+  kind: SignalKind;
+  argues: "raised" | "asserted" | "demonstrated" | "misunderstood" | null;
+  turnIndex: number;
+  at: number;
+  quote: string;
+  detail: string;
+  score: number;
+};
+
 // The customer's own words, normalised and clipped. Never the raw transcript: the record is
 // built from concept-tied fragments only, which is what the consent copy promises.
 export type Evidence = {

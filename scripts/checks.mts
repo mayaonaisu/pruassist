@@ -24,11 +24,12 @@ const { clauseById } = await import("../src/lib/knowledge.ts");
 const { applyActs, applyDetections, buildRecord, chooseAlert } = await import("../src/lib/agent/ledger.ts");
 const { rankByRisk } = await import("../src/lib/agent/lookahead.ts");
 const { matchesLookahead } = await import("../src/lib/agent/cache.ts");
-const { isBareAssent, isQuestion } = await import("../src/lib/agent/signals.ts");
+const { isBareAssent, isQuestion } = await import("../src/lib/agent/utterance.ts");
+const { runSignals } = await import("../src/lib/agent/signals.ts");
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
 
-type Detection = import("../src/lib/agent/signals.ts").Detection;
+type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
 type Turn = import("../src/lib/agent/types.ts").Turn;
 
@@ -184,6 +185,100 @@ test("questions are recognised with and without the question mark", () => {
   assert.equal(isQuestion("how much would I pay"), true);
   assert.equal(isQuestion("so any hospital is fine then?"), true);
   assert.equal(isQuestion("so any hospital is fine then"), false);
+});
+
+/* ---------- the detectors ---------- */
+
+// The split moved six detectors behind one internal seam. These pin the rules that used to be
+// expressed by where the code sat in a single loop — a `continue`, and two separate loops — and
+// are now expressed as facts on the context. Nothing else asserts them.
+
+const DEDUCTIBLE_EXPLAINED = "The deductible is the amount you pay yourself first, once per policy year, before MediShield Life or PRUShield pays anything.";
+
+async function detectionsFor(script: [role: "rep" | "customer", text: string, offset: number][], index?: number) {
+  const turns: Turn[] = script.map(([role, text, offset]) => ({
+    at: AT + offset * 1000,
+    role,
+    speaker: role,
+    text,
+  }));
+  const from = index ?? turns.length - 1;
+  const { detections } = await runSignals(turns, conceptsForArea(AREA), from);
+  return detections;
+}
+
+test("a bare assent suppresses uptake, divergence and re-ask", async () => {
+  const kinds = (
+    await detectionsFor([
+      ["rep", DEDUCTIBLE_EXPLAINED, 0],
+      ["customer", "Okay, yeah, that makes sense.", 8],
+    ])
+  ).map((d) => d.kind);
+  assert.ok(kinds.includes("assent"), "the assent itself must still be detected");
+  assert.deepEqual(
+    kinds.filter((k) => k === "uptake" || k === "divergence" || k === "re-ask"),
+    [],
+    "a contentless agreement was scored as if it had content",
+  );
+});
+
+test("assent only counts against something the rep just said", async () => {
+  // The same words, but answering another customer turn rather than the rep. Not a bare assent,
+  // so the downstream detectors are free to run.
+  const kinds = (
+    await detectionsFor([
+      ["rep", DEDUCTIBLE_EXPLAINED, 0],
+      ["customer", "Let me think about that for a second.", 8],
+      ["customer", "Okay, yeah, that makes sense.", 14],
+    ])
+  ).map((d) => d.kind);
+  assert.ok(!kinds.includes("assent"));
+});
+
+test("only rep turns raise a concept", async () => {
+  const fromRep = await detectionsFor([["rep", DEDUCTIBLE_EXPLAINED, 0]], 0);
+  assert.deepEqual(
+    fromRep.map((d) => d.argues),
+    ["raised"],
+  );
+
+  // A customer using the same words is scored, never credited with raising it.
+  const fromCustomer = await detectionsFor([["customer", DEDUCTIBLE_EXPLAINED, 0]], 0);
+  assert.ok(!fromCustomer.some((d) => d.argues === "raised"));
+});
+
+test("a pause is reported above two seconds and not below", async () => {
+  // "Okay." is ~0.4s of speech, so the gap is the offset minus roughly that.
+  const quick = await detectionsFor([
+    ["rep", DEDUCTIBLE_EXPLAINED, 0],
+    ["customer", "Okay.", 1],
+  ]);
+  assert.ok(!quick.some((d) => d.kind === "latency"), "reported a pause that was not there");
+
+  const slow = await detectionsFor([
+    ["rep", DEDUCTIBLE_EXPLAINED, 0],
+    ["customer", "Okay.", 6],
+  ]);
+  assert.ok(slow.some((d) => d.kind === "latency"), "missed a five-second silence");
+  assert.ok(
+    slow.every((d) => d.kind !== "latency" || d.argues === null),
+    "timing must never argue for a state",
+  );
+});
+
+test("dropping every qualifier the rep used is a divergence", async () => {
+  const detections = await detectionsFor([
+    [
+      "rep",
+      "Using a panel or Extended Panel provider is what unlocks the cover; at a non-panel provider the deductible is not covered and stop-loss does not apply.",
+      0,
+    ],
+    ["customer", "So I would just pick whichever hospital and any doctor I like.", 12],
+  ]);
+  const divergence = detections.filter((d) => d.kind === "divergence");
+  assert.equal(divergence.length, 1, `expected one divergence, got ${JSON.stringify(detections.map((d) => d.kind))}`);
+  assert.equal(divergence[0].conceptId, "panel-providers");
+  assert.match(divergence[0].detail, /Dropped the qualifier/);
 });
 
 /* ---------- the scoring pass ---------- */
