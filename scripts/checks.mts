@@ -30,6 +30,7 @@ const { detectAssent, detectDivergence, detectLatency, detectRaised, detectReAsk
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
 const { lastFromCustomer, newestAt, toTurns, windowToSend } = await import("../src/lib/transcript.ts");
+const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 
 type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
@@ -326,6 +327,41 @@ test("dropping every qualifier the rep used is a divergence", async () => {
   assert.equal(divergence.length, 1, `expected one divergence, got ${JSON.stringify(detections.map((d) => d.kind))}`);
   assert.equal(divergence[0].conceptId, "panel-providers");
   assert.match(divergence[0].detail, /Dropped the qualifier/);
+});
+
+/* ---------- decisions ---------- */
+
+test("every decision anchors to real clauses and real concepts", () => {
+  for (const d of DECISIONS) {
+    assert.ok(d.options.length >= 2, `${d.id} needs at least two options`);
+    assert.ok(d.differentiators.length > 0, `${d.id} has no differentiators`);
+    for (const o of d.options) {
+      assert.ok(o.clauseIds.length > 0, `${d.id}/${o.id} cites no clauses`);
+      for (const id of o.clauseIds) assert.ok(clauseById(id), `${d.id}/${o.id} cites missing clause ${id}`);
+      assert.ok(o.gist.trim().length > 0, `${d.id}/${o.id} has no gist`);
+    }
+    for (const id of [...d.prerequisites, ...d.differentiators]) {
+      assert.ok(conceptById(id), `${d.id} names missing concept ${id}`);
+    }
+    // A concept cannot both underpin the comparison and decide it.
+    for (const id of d.differentiators) {
+      assert.ok(!d.prerequisites.includes(id), `${d.id} lists ${id} as both`);
+    }
+  }
+});
+
+test("decisions are scoped to a product area and addressable by id", () => {
+  assert.ok(decisionsForArea(AREA).length >= 2);
+  assert.deepEqual(decisionsForArea("Retirement"), []);
+  assert.equal(decisionById("which-tier")?.id, "which-tier");
+  assert.equal(decisionById("nope"), undefined);
+});
+
+test("a comparison question is recognised, an explanation question is not", () => {
+  const tier = decisionById("which-tier")!;
+  assert.equal(looksComparative("What is the difference between Premier and Plus?", tier), true);
+  assert.equal(looksComparative("Which plan should I take?", tier), true);
+  assert.equal(looksComparative("What is a deductible?", tier), false);
 });
 
 /* ---------- the scoring pass ---------- */
