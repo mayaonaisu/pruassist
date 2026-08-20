@@ -1,26 +1,13 @@
-// PRUShield / PRUExtra Health Protection knowledge base.
-//
-// Clauses below are sourced from Prudential's public "PRUShield" Product Brochure
-// (information correct as at 1 April 2026). Page numbers ("p.N") refer to that
-// brochure PDF. The text is quoted/closely grounded in the brochure so the AI can
-// cite an exact source; figures should still be re-verified against the latest
-// brochure and the policy documents before any real advisory use — the brochure
-// itself states it "is for reference only and is not a contract of insurance."
-//
-// Scope: Health Protection only (PRUShield base plan + PRUExtra supplementary plan).
-// To add other lines (Life, Critical Illness) later, append clauses in the same shape.
+// PRUShield / PRUExtra clauses from the public brochure (Apr 2026). Re-verify figures before real advisory use.
 
 export type Clause = { id: string; source: string; text: string };
 
-// The documents the AI can actually cite, derived from the clauses themselves so the UI can never
-// advertise a source the retriever has no clauses from. Sources are "<document> · p.N, p.M".
+// Documents the AI can cite, derived from the clauses so the UI can't advertise a missing source.
 export function knowledgeDocuments(): string[] {
   return [...new Set(KNOWLEDGE.map((c) => c.source.split(" · ")[0]))];
 }
 
-// What the UI shows as "documents in scope": one row per document, with the clause count and
-// page span the retriever can actually cite from. Derived from the clauses themselves, so the
-// screen can never advertise coverage the knowledge base doesn't have.
+// One row per document with the clause count and page span the retriever can cite.
 export type DocumentIndex = { doc: string; clauses: number; pages: string };
 
 export function knowledgeIndex(): DocumentIndex[] {
@@ -48,13 +35,13 @@ export const KNOWLEDGE: Clause[] = [
   },
   {
     id: "deductible-definition",
-    source: "PRUShield Product Brochure (Apr 2026) · p.2, p.12",
-    text: "The deductible is the amount you need to pay before any MediShield Life and PRUShield benefits are paid out. It is paid once per policy year. It increases by 50% depending on ward class when the Life Assured is above age 85.",
+    source: "PRUShield Product Brochure (Apr 2026) · p.2, p.12, p.17",
+    text: "The deductible is the amount you need to pay before any MediShield Life and PRUShield benefits are paid out. It is paid once per policy year. It increases by 50% depending on ward class when the Life Assured is above age 85 (p.17).",
   },
   {
     id: "deductible-amounts",
     source: "PRUShield Product Brochure (Apr 2026) · p.17",
-    text: "For PRUShield Premier/Plus, the per-policy-year deductible by setting is: Restructured Hospital C Ward S$1,500; B2/B2+ Ward S$2,000; B1 Ward S$2,500; A Ward S$3,500; Private Hospital S$3,500; Day Surgery (Subsidised) S$1,500; Day Surgery (Non-Subsidised) S$2,000. PRUShield Standard has its own deductible schedule that also varies with age (see p.24).",
+    text: "For PRUShield Premier/Plus, the per-policy-year deductible by setting is: Restructured Hospital C Ward S$1,500; B2/B2+ Ward S$2,000; B1 Ward S$2,500; A Ward S$3,500; Private Hospital S$3,500; Day Surgery (Subsidised) S$1,500; Day Surgery (Non-Subsidised) S$2,000; Short Stay Ward (Subsidised) S$1,500; Short Stay Ward (Non-Subsidised) S$2,000. PRUShield Standard has its own deductible schedule that also varies with age (see p.24).",
   },
   {
     id: "co-insurance",
