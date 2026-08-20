@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "replay": "tsx scripts/replay.mts"
+    "replay": "tsx scripts/replay.mts",
+    "replay:all": "tsx scripts/replay.mts fixtures/false-assent.json fixtures/panel-misconception.json fixtures/re-ask.json fixtures/explain-back.json fixtures/off-topic.json"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",

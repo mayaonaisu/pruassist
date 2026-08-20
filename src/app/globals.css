@@ -1272,8 +1272,11 @@ button {
   color: var(--pencil);
   text-align: right;
 }
-.ur-risk:not(:empty) {
+/* Always placed, or an empty cell would be auto-flowed into a row of its own. */
+.ur-risk {
   grid-area: risk;
+}
+.ur-risk:not(:empty) {
   font-size: 11.5px;
   color: var(--marker-ink);
   padding-top: 2px;

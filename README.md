@@ -143,11 +143,12 @@ unreachable; both paths must pass. This is also the deterministic fallback if li
 are bad — browser speech recognition on venue wifi is not something to stake a run on.
 
 ```bash
-npm run replay -- fixtures/false-assent.json fixtures/panel-misconception.json fixtures/re-ask.json fixtures/explain-back.json fixtures/off-topic.json
+npm run replay:all
 ```
 
 The five fixtures cover a false assent, the panel-provider misconception, a re-asked question, a
-correct explain-back, and small talk the assistant must stay silent through.
+correct explain-back, and small talk the assistant must stay silent through. Each one declares the
+state it expects, so the run exits non-zero when a change breaks one.
 
 ## Video and transcription
 
