@@ -25,10 +25,11 @@ const { applyActs, applyDetections, buildRecord, chooseAlert } = await import(".
 const { rankByRisk } = await import("../src/lib/agent/lookahead.ts");
 const { matchesLookahead } = await import("../src/lib/agent/cache.ts");
 const { isBareAssent, isQuestion } = await import("../src/lib/agent/utterance.ts");
-const { runSignals } = await import("../src/lib/agent/signals.ts");
+const { prepare, runSignals } = await import("../src/lib/agent/signals.ts");
+const { detectAssent, detectDivergence, detectLatency, detectRaised, detectReAsk, detectUptake } = await import("../src/lib/agent/detectors.ts");
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
-const { lastFromCustomer, newestAt, toTurns } = await import("../src/lib/transcript.ts");
+const { lastFromCustomer, newestAt, toTurns, windowToSend } = await import("../src/lib/transcript.ts");
 
 type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
@@ -291,6 +292,27 @@ test("role is carried from the turn, never derived from what the detector argues
   assert.equal(s.concepts["deductible-definition"].evidence[0].role, "rep");
 });
 
+test("a detector can be driven on its own", async () => {
+  // Directly, not through the sweep — this is what splitting them was for. `prepare` builds the
+  // contexts so the check does not have to restate the setup runSignals owns.
+  const turns: Turn[] = [
+    { at: AT, role: "rep", speaker: "rep", text: DEDUCTIBLE_EXPLAINED },
+    { at: AT + 9000, role: "customer", speaker: "customer", text: "Okay." },
+  ];
+  const { contexts } = await prepare(turns, conceptsForArea(AREA), 0);
+  const [repTurn, assentTurn] = contexts;
+
+  // Each detector answers for itself, in any order, with no sweep around it.
+  assert.equal(detectRaised(repTurn).length > 0, true);
+  assert.deepEqual(detectRaised(assentTurn), [], "raised is rep-only");
+  assert.deepEqual(detectAssent(repTurn), [], "assent is customer-only");
+  assert.equal(detectAssent(assentTurn).length > 0, true);
+  assert.deepEqual(detectUptake(assentTurn), [], "a bare assent has nothing to score");
+  assert.deepEqual(detectDivergence(assentTurn), []);
+  assert.deepEqual(detectReAsk(assentTurn), []);
+  assert.equal(detectLatency(assentTurn).length > 0, true, "nine seconds is a pause");
+});
+
 test("dropping every qualifier the rep used is a divergence", async () => {
   const detections = await detectionsFor([
     [
@@ -393,6 +415,47 @@ test("the question sent for the prepared-answer check is the customer's last lin
   assert.equal(lastFromCustomer([], "Bryan Eng"), "");
   assert.equal(newestAt(lines), AT + 3000);
   assert.equal(newestAt([]), 0);
+});
+
+test("the console sends the window only when there is something new — and always on the last pass", () => {
+  const lines = [
+    { id: "1", at: AT, speaker: "Bryan Eng", text: "The deductible comes first." },
+    { id: "2", at: AT + 1000, speaker: "Mei Ling", text: "Okay." },
+  ];
+
+  // Nothing sent yet: the whole window goes up.
+  const first = windowToSend(lines, "Bryan Eng", 0);
+  assert.equal(first.fresh, true);
+  assert.equal(first.turns.length, 2);
+  assert.equal(first.newest, AT + 1000);
+
+  // Cursor caught up: the poll still happens — the reply carries the ledger back — but the server
+  // is not asked to re-score turns it has already folded in.
+  const again = windowToSend(lines, "Bryan Eng", first.newest);
+  assert.equal(again.fresh, false);
+  assert.deepEqual(again.turns, []);
+
+  // Ending forces it regardless: the record is the deliverable and the last exchange has to land.
+  const closing = windowToSend(lines, "Bryan Eng", first.newest, true);
+  assert.equal(closing.fresh, true);
+  assert.equal(closing.turns.length, 2);
+
+  // One new line makes it fresh again.
+  const grown = [...lines, { id: "3", at: AT + 2000, speaker: "Mei Ling", text: "And after that?" }];
+  assert.equal(windowToSend(grown, "Bryan Eng", first.newest).fresh, true);
+});
+
+test("the sent window is capped, so a long session does not grow the request forever", () => {
+  const many = Array.from({ length: 200 }, (_, i) => ({
+    id: String(i),
+    at: AT + i * 1000,
+    speaker: i % 2 ? "Mei Ling" : "Bryan Eng",
+    text: `line ${i}`,
+  }));
+  const send = windowToSend(many, "Bryan Eng", 0);
+  assert.equal(send.turns.length, 60);
+  // The cap keeps the newest, never the oldest.
+  assert.equal(send.turns[send.turns.length - 1].text, "line 199");
 });
 
 /* ---------- the cache gate ---------- */

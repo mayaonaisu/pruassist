@@ -1,5 +1,5 @@
 import { CONCEPTS, type Concept } from "../concepts";
-import { buildContext, buildScorer, DETECTORS } from "./detectors";
+import { buildContext, buildScorer, DETECTORS, type TurnContext } from "./detectors";
 import { conceptsMentioned } from "./utterance";
 import type { Detection, Turn } from "./types";
 
@@ -11,15 +11,17 @@ import type { Detection, Turn } from "./types";
 
 export type SignalResult = { detections: Detection[]; degraded: boolean };
 
-// `from` is the first turn not yet folded into the ledger. Earlier turns are still read, because
-// re-ask and divergence both need the turns the customer is echoing.
-export async function runSignals(
-  turns: Turn[],
-  pool: Concept[] = CONCEPTS,
-  from = 0,
-): Promise<SignalResult> {
-  if (!turns.length || !pool.length) return { detections: [], degraded: false };
-
+/**
+ * One prepared context per turn to be scored, plus the scorer they share.
+ *
+ * Exported so a single detector can be driven on its own — the reason for splitting them was to
+ * make that possible, and building a context by hand in a test would restate the very setup this
+ * function owns.
+ *
+ * `from` is the first turn not yet folded into the ledger. Earlier turns are still read, because
+ * re-ask and divergence both need the turns the customer is echoing.
+ */
+export async function prepare(turns: Turn[], pool: Concept[], from = 0) {
   const customerText = turns.filter((t) => t.role === "customer").map((t) => t.text);
   const targets = pool.flatMap((c) => [c.canonical, ...c.misconceptions]);
   const scorer = await buildScorer([...customerText, ...targets]);
@@ -32,9 +34,23 @@ export async function runSignals(
     if (hits.length) raisedBy.set(i, hits);
   });
 
-  const detections: Detection[] = [];
+  const contexts: TurnContext[] = [];
   for (let i = Math.max(0, from); i < turns.length; i++) {
-    const ctx = buildContext(turns, i, pool, scorer, raisedBy);
+    contexts.push(buildContext(turns, i, pool, scorer, raisedBy));
+  }
+  return { contexts, scorer };
+}
+
+export async function runSignals(
+  turns: Turn[],
+  pool: Concept[] = CONCEPTS,
+  from = 0,
+): Promise<SignalResult> {
+  if (!turns.length || !pool.length) return { detections: [], degraded: false };
+
+  const { contexts, scorer } = await prepare(turns, pool, from);
+  const detections: Detection[] = [];
+  for (const ctx of contexts) {
     for (const detect of DETECTORS) detections.push(...detect(ctx));
   }
 

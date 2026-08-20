@@ -42,3 +42,32 @@ export function lastFromCustomer(lines: Line[], repName: string): string {
   }
   return "";
 }
+
+// The window, not just the new lines: re-ask and divergence both need what came before.
+const SEND_WINDOW = 60;
+
+export type Send = {
+  /** The window to send, or empty when the server has already seen everything. */
+  turns: Turn[];
+  /** The cursor to advance to, once the send succeeds. */
+  newest: number;
+  fresh: boolean;
+};
+
+/**
+ * What the console should send on this cycle. Every poll is a round trip whether or not there is
+ * anything new, because the reply carries the ledger back — but re-sending an unchanged window
+ * would make the server re-score turns it has already folded in.
+ *
+ * `final` forces a send regardless: the record is the deliverable, and the last exchange has to
+ * reach the deep pass even if the poll before it already carried the same window.
+ *
+ * Pulled out of the hook so the rule can be checked without a browser. What remains inside the
+ * hook is the ref that holds the cursor and the effect that ticks — plumbing, not a decision.
+ */
+export function windowToSend(lines: Line[], repName: string, sentUpTo: number, final = false): Send {
+  const window = lines.slice(-SEND_WINDOW);
+  const newest = newestAt(window);
+  const fresh = final || newest > sentUpTo;
+  return { turns: fresh ? toTurns(window, repName) : [], newest, fresh };
+}

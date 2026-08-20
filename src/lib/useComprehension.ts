@@ -2,16 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Alert, RecordRow } from "./agent/types";
-import { newestAt, toTurns, type Line } from "./transcript";
+import { windowToSend, type Line } from "./transcript";
 
 // The two-speed loop, from the client's side. One request per cycle carries the transcript window
 // up and brings the ledger back down — the deep pass runs after the response is flushed, so what
 // the rep sees is always one cycle behind the scoring and never waits on it.
 
 const POLL_MS = 5000;
-
-// The window, not just the new lines: re-ask and divergence both need what came before.
-const WINDOW = 60;
 
 // How long to wait for the final pass before reading the record back. The pass starts once the
 // POST has responded, so there is nothing to poll — only a short wait.
@@ -58,19 +55,12 @@ export function useComprehension({
 
   const sync = useCallback(
     async (act?: { type: "teach-back-asked" | "dismiss"; conceptId: string }, final = false) => {
-      const window = latest().slice(-WINDOW);
-      const newest = newestAt(window);
-      const fresh = final || newest > sentUpToRef.current;
+      const { turns, newest, fresh } = windowToSend(latest(), repName, sentUpToRef.current, final);
       try {
         const res = await fetch("/api/agent/state", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            roomId,
-            act,
-            final,
-            turns: fresh ? toTurns(window, repName) : [],
-          }),
+          body: JSON.stringify({ roomId, act, final, turns }),
         });
         if (!res.ok) return;
         const data = (await res.json()) as AgentView;
