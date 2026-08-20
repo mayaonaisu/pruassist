@@ -19,7 +19,7 @@
  *
  * One thing to expect: the injected lines do not appear in the console's transcript pane. That
  * pane renders what the browser itself captured, and these turns went to the server directly. The
- * alert, the strip and the record all update normally.
+ * alert, the readiness panel and the record all update normally.
  */
 
 import { readFileSync } from "node:fs";

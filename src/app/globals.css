@@ -540,7 +540,7 @@ button {
   border-radius: var(--r-xs);
 }
 
-/* the confusion timeline */
+/* readiness — the comparison in play, and what is still open */
 .c-meta {
   flex: 1;
   border: 1px solid var(--rule);
@@ -559,37 +559,86 @@ button {
   color: var(--pencil);
   margin-bottom: 8px;
 }
-.bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  flex: 1;
-  min-height: 26px;
-}
-.bars span {
-  flex: 1;
-  background: var(--brochure-3);
-  border-radius: 1px;
-  transition: height 0.3s ease;
-}
-.bars span.mid {
-  background: rgba(232, 179, 23, 0.45);
-}
-.bars span.hi {
-  background: var(--marker);
-}
-.strip-legend {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 6px;
-  font-family: var(--font-mono);
-  font-size: 8.5px;
+/* Readiness — what still stands between the rep and a recommendation. Colours match the
+   Understanding Record's .ur-* states so the console and the artifact agree. */
+.ready-idle {
+  font-size: 11.5px;
+  line-height: 1.5;
   color: var(--pencil);
 }
-.strip-legend b {
-  font-weight: 400;
+.ready-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+.ready-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0 3px 8px;
+  border-left: 2px solid var(--rule);
+}
+.ready-label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.ready-state {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pencil);
+}
+.ready-demonstrated {
+  border-left-color: var(--stamp);
+}
+.ready-demonstrated .ready-state {
+  color: var(--stamp);
+}
+.ready-asserted {
+  border-left-color: var(--marker);
+}
+.ready-asserted .ready-state {
   color: var(--marker-ink);
+}
+.ready-misunderstood {
+  border-left-color: var(--pru);
+}
+.ready-misunderstood .ready-state {
+  color: var(--pru);
+}
+.ready-foot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule-soft);
+  flex: none;
+}
+.ready-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--pencil);
+}
+.ready-go {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--stamp);
+  background: var(--stamp-wash);
+  padding: 3px 8px;
+  border-radius: var(--r-xs);
+}
+.ready-foot .ghost {
+  margin-left: auto;
+  padding: 4px 9px;
+  font-size: 11px;
 }
 
 /* THE LINE — the one thing the rep reads mid-conversation */

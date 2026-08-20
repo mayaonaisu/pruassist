@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LiveKitRoom, RoomAudioRenderer, useRoomContext } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { CAM_LABEL, Faces, isBroken } from "@/components/Faces";
@@ -11,7 +11,7 @@ import { usePointers } from "@/lib/usePointers";
 import { useTranscript } from "@/lib/useTranscript";
 import { transcriptText } from "@/lib/transcript";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
-import type { Alert } from "@/lib/agent/types";
+import type { Alert, ConceptState } from "@/lib/agent/types";
 
 export default function LiveStep({
   repName,
@@ -54,8 +54,6 @@ export default function LiveStep({
     </LiveKitRoom>
   );
 }
-
-const BUCKETS = 16;
 
 // Isolated so the ticking clock re-renders a <span>, not the whole console every second.
 function Elapsed({ startedAt }: { startedAt: number }) {
@@ -119,26 +117,6 @@ function LiveConsole({
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-
-  // Ledger transitions, plotted where in the session they happened. This used to plot regex hits
-  // on the transcript, which looked like comprehension data without being any.
-  const { bars, openCount } = useMemo(() => {
-    const out = new Array(BUCKETS).fill(0) as number[];
-    const timed = agent.record.filter((r) => r.at && r.state !== "unseen");
-    // Spanned by the evidence itself rather than by the clock, so the memo stays pure and the
-    // bars do not creep leftward every second the rep sits idle.
-    const last = timed.reduce((m, r) => Math.max(m, r.at ?? 0), startedAt);
-    const span = Math.max(1, last - startedAt);
-    let open = 0;
-    for (const row of timed) {
-      if (row.risk) open += 1;
-      const weight = row.state === "misunderstood" ? 2 : row.state === "asserted" ? 1 : 0;
-      if (!weight) continue;
-      const slot = Math.floor(((row.at! - startedAt) / span) * (BUCKETS - 1));
-      out[Math.min(BUCKETS - 1, Math.max(0, slot))] += weight;
-    }
-    return { bars: out, openCount: open };
-  }, [agent.record, startedAt]);
 
   // While the rep is muted, drop their half-captured phrase so no stale "live" text lingers.
   const visibleInterim = media.mic === "on" ? interim : { ...interim, [repName]: "" };
@@ -206,25 +184,45 @@ function LiveConsole({
       <div className="c-top">
         <Faces media={media} />
         <div className="c-meta">
-          <div className="strip-h">Where they lost the thread</div>
-          {/* Real ledger transitions: taller and darker where a concept was only agreed to, or
-              where the customer said something the clauses contradict. */}
-          <div className="bars">
-            {bars.map((n, i) => (
-              <span
-                key={i}
-                className={n >= 2 ? "hi" : n === 1 ? "mid" : ""}
-                style={{ height: `${Math.min(92, 16 + n * 34)}%` }}
-              />
-            ))}
-          </div>
-          <div className="strip-legend">
-            <span>00:00</span>
-            <span>
-              <b>{openCount} open</b>
-            </span>
-            <span>now</span>
-          </div>
+          {/* What still stands between the representative and a recommendation. This replaced a
+              strip of bars derived from a handful of timestamps — real ledger state, same slot. */}
+          <div className="strip-h">{agent.readiness?.question ?? "Ready to recommend"}</div>
+          {!agent.readiness ? (
+            <p className="ready-idle">
+              Once you start comparing options, what the customer still needs to understand appears here.
+            </p>
+          ) : (
+            <>
+              <div className="ready-rows pru-scroll">
+                {agent.readiness.standing.map((s) => (
+                  <div key={s.conceptId} className={`ready-row ready-${s.state}`}>
+                    <span className="ready-label">{s.label}</span>
+                    <span className="ready-state">{READY_STATE[s.state]}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="ready-foot">
+                {agent.readiness.ready ? (
+                  <span className="ready-go">Ready to recommend</span>
+                ) : (
+                  <>
+                    <span className="ready-count">
+                      {agent.readiness.settled} / {agent.readiness.total} settled
+                    </span>
+                    {agent.readiness.nextConceptId && (
+                      <button
+                        className="ghost"
+                        title={agent.readiness.nextQuestion ?? undefined}
+                        onClick={() => comprehension.act("teach-back-asked", agent.readiness!.nextConceptId!)}
+                      >
+                        Ask it
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -422,4 +420,13 @@ const ALERT_CAT: Record<Alert["kind"], string> = {
   divergence: "Qualifier dropped",
   "re-ask": "Asked again",
   "explain-back": "Teach-back graded",
+};
+
+// The ledger state, in words a representative reads at a glance mid-conversation.
+const READY_STATE: Record<ConceptState, string> = {
+  unseen: "not raised",
+  raised: "explained",
+  asserted: "agreed only",
+  demonstrated: "shown",
+  misunderstood: "wrong",
 };
