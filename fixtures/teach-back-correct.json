@@ -1,0 +1,19 @@
+{
+  "name": "The teach-back is asked, and answered correctly",
+  "productArea": "Health Protection",
+  "expect": "deductible-definition:demonstrated",
+  "needsAi": true,
+  "note": "The happy path for the graded loop — the customer answers in their own words, without the jargon, and the ledger reaches demonstrated.",
+  "turns": [
+    { "t": "00:38", "role": "rep", "text": "The deductible is the amount you pay yourself first, once per policy year, before MediShield Life or PRUShield pays anything at all." },
+    { "t": "00:43", "role": "customer", "text": "Okay, yeah, that makes sense." },
+    {
+      "t": "00:52",
+      "role": "rep",
+      "text": "Just so I know I explained it well — if your bill came to S$8,000 at a panel hospital, what would you expect to pay first, and who pays the rest?",
+      "act": "teach-back-asked",
+      "conceptId": "deductible-definition"
+    },
+    { "t": "01:08", "role": "customer", "text": "I'd cover the first slice out of my own pocket, and that is only once for the whole year, then the insurance picks up the rest of the eight thousand." }
+  ]
+}

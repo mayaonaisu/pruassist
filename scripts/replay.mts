@@ -20,6 +20,7 @@ import { basename } from "node:path";
 
 const args = process.argv.slice(2);
 const noAi = args.includes("--no-ai");
+const withLookahead = args.includes("--lookahead");
 const files = args.filter((a) => !a.startsWith("--"));
 
 if (!files.length) {
@@ -36,7 +37,9 @@ delete process.env.KV_REST_API_TOKEN;
 if (noAi) delete process.env.GEMINI_API_KEY;
 
 const { conceptsForArea } = await import("../src/lib/concepts.ts");
-const { applyDetections, buildRecord, chooseAlert, sameAlert } = await import("../src/lib/agent/ledger.ts");
+const { applyActs, applyDetections, buildRecord, chooseAlert, sameAlert } = await import("../src/lib/agent/ledger.ts");
+const { gradeTeachBacks } = await import("../src/lib/agent/judge.ts");
+const { prepareLookahead, rankByRisk } = await import("../src/lib/agent/lookahead.ts");
 const { runSignals } = await import("../src/lib/agent/signals.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
 type Turn = import("../src/lib/agent/types.ts").Turn;
@@ -47,7 +50,17 @@ type Fixture = {
   name: string;
   productArea: string;
   expect?: string;
-  turns: { t: string; role: "rep" | "customer"; text: string }[];
+  expectAlert?: string;
+  // Grading a teach-back needs a model. Such a fixture is skipped rather than failed under --no-ai.
+  needsAi?: boolean;
+  turns: {
+    t: string;
+    role: "rep" | "customer";
+    text: string;
+    // The rep pressing "Asked it" on an alert, scripted so the teach-back loop is replayable.
+    act?: "teach-back-asked" | "dismiss";
+    conceptId?: string;
+  }[];
 };
 
 // Fixed base so runs are byte-identical: the ledger stores timestamps and the record prints them.
@@ -82,8 +95,13 @@ const STATE_COLOUR: Record<string, (s: string) => string> = {
   misunderstood: C.red,
 };
 
-async function replay(file: string): Promise<boolean> {
+async function replay(file: string): Promise<boolean | null> {
   const fx = JSON.parse(readFileSync(file, "utf8")) as Fixture;
+  if (fx.needsAi && noAi) {
+    console.log("");
+    console.log(C.bold(basename(file)) + C.dim(" · skipped — grading a teach-back needs a model"));
+    return null;
+  }
   const pool = conceptsForArea(fx.productArea);
 
   const turns: Turn[] = fx.turns.map((t) => ({
@@ -108,8 +126,20 @@ async function replay(file: string): Promise<boolean> {
     const who = turn.role === "rep" ? "REP     " : C.cyan("CUSTOMER");
     console.log(`  ${C.dim(clock(turn.at))}  ${who}  ${turn.text}`);
 
+    // A scripted rep action lands before the turn is scored, exactly as the deep pass folds the
+    // acts queue in before it runs the detectors.
+    const scripted = fx.turns[i];
+    if (scripted.act && scripted.conceptId) {
+      state = applyActs(state, [{ type: scripted.act, conceptId: scripted.conceptId, at: turn.at }]);
+      console.log(C.dim(`              ↳ rep act     ${scripted.act} on ${scripted.conceptId}`));
+    }
+
     const before = new Map(Object.entries(state.concepts).map(([k, v]) => [k, v.state]));
-    const { detections } = await runSignals(turns.slice(0, i + 1), pool, i);
+    const { detections: signalled } = await runSignals(turns.slice(0, i + 1), pool, i);
+    // Graded last so it lands after the detectors for the same turn — a judgement made against the
+    // clause overrides a similarity score.
+    const graded = await gradeTeachBacks(state, turns.slice(0, i + 1));
+    const detections = [...signalled, ...graded];
     state = applyDetections(state, detections);
 
     for (const d of detections) {
@@ -119,7 +149,7 @@ async function replay(file: string): Promise<boolean> {
       const to = state.concepts[d.conceptId]?.state ?? from;
       const arrow = d.argues && to !== from ? ` ${from} → ${to}` : d.argues ? ` (stays ${to})` : "";
       console.log(
-        C.dim(`              ↳ ${d.kind.padEnd(11)}`) +
+        C.dim(`              ↳ ${d.kind.padEnd(13)}`) +
           `${d.conceptId}${C.dim(arrow)}  ${C.dim(d.detail)}` +
           (d.score > 0 && d.score < 1 ? C.dim(`  [${d.score.toFixed(3)}]`) : ""),
       );
@@ -151,24 +181,55 @@ async function replay(file: string): Promise<boolean> {
     );
   }
 
+  // The lookahead is a tool loop and several model calls, so it is opt-in rather than part of the
+  // normal loop. It prints what the background pass would have prepared at the end of this
+  // conversation, and which concept it judged riskiest.
+  if (withLookahead && !noAi) {
+    console.log("");
+    console.log(C.bold("  Lookahead"));
+    console.log(C.dim(`  risk order: ${rankByRisk(state).map((c) => c.label).join(" > ") || "(nothing open)"}`));
+    const look = await prepareLookahead(state, turns.map((t) => `${t.role === "rep" ? "Rep" : "Customer"}: ${t.text}`).join("\n"));
+    if (!look) {
+      console.log(C.dim("  nothing prepared — no open concept, or the answer failed verification"));
+    } else {
+      console.log(`  ${C.dim("expects")} ${C.cyan(`“${look.question}”`)} ${C.dim(`· ${look.label}`)}`);
+      console.log(`  ${C.dim("answer ")} “${look.pointers.suggestedLine}”`);
+      console.log(C.dim(`  tools:  ${look.toolCalls.join("  ") || "(none)"}`));
+      console.log(C.dim(`  grounding verified: ${look.verified}`));
+    }
+  }
+
+  let ok = true;
+  const results: string[] = [];
   if (fx.expect) {
     const [conceptId, want] = fx.expect.split(":");
-    const got = want === "silent" ? (alerts === 0 ? "silent" : "alerted") : state.concepts[conceptId]?.state ?? "unseen";
-    const ok = got === want;
-    console.log("");
-    console.log(`  ${ok ? C.green("PASS") : C.red("FAIL")}  expected ${conceptId} = ${want}, got ${got}`);
-    return ok;
+    const got = want === "silent" ? (alerts === 0 ? "silent" : "alerted") : (state.concepts[conceptId]?.state ?? "unseen");
+    ok &&= got === want;
+    results.push(`${conceptId} = ${want}, got ${got}`);
   }
-  return true;
+  if (fx.expectAlert) {
+    const got = state.alert?.kind ?? "none";
+    ok &&= got === fx.expectAlert;
+    results.push(`alert = ${fx.expectAlert}, got ${got}`);
+  }
+  if (!results.length) return true;
+  console.log("");
+  console.log(`  ${ok ? C.green("PASS") : C.red("FAIL")}  expected ${results.join(" · ")}`);
+  return ok;
 }
 
 let failed = 0;
+let skipped = 0;
 for (const f of files) {
-  if (!(await replay(f))) failed++;
+  const result = await replay(f);
+  if (result === null) skipped++;
+  else if (!result) failed++;
 }
+const ran = files.length - skipped;
 console.log("");
+const tail = skipped ? C.dim(` · ${skipped} skipped`) : "";
 if (failed) {
-  console.log(C.red(`${failed} of ${files.length} fixtures failed`));
+  console.log(C.red(`${failed} of ${ran} fixtures failed`) + tail);
   process.exit(1);
 }
-console.log(C.green(`${files.length} fixture${files.length === 1 ? "" : "s"} passed`));
+console.log(C.green(`${ran} fixture${ran === 1 ? "" : "s"} passed`) + tail);

@@ -27,13 +27,27 @@ type Pointers = {
   comparison: string;
   followUp: string;
   sources: Src[];
+  // Served from the background pass, which prepared and grounding-checked this answer before the
+  // question was asked. Shown, not hidden — the rep should be able to see what they are reading.
+  cached: boolean;
+  prepared?: { label: string; question: string; at: number; match: number };
+  // Figures in the suggested line that appear nowhere in the cited pages. A label, never a block.
+  unsupportedFigures: string[];
 };
 
 // What the live console knows about comprehension, handed to the brief when the session ends.
 export type Comprehension = Pick<SummaryData, "record" | "customerName">;
 
 // The private comprehension state, polled from the deep pass.
-type AgentView = { rev: number; alert: Alert | null; record: RecordRow[]; degraded: boolean; unavailable?: boolean };
+type Prepared = { label: string; question: string; at: number; toolCalls: string[] };
+type AgentView = {
+  rev: number;
+  alert: Alert | null;
+  record: RecordRow[];
+  degraded: boolean;
+  prepared: Prepared | null;
+  unavailable?: boolean;
+};
 
 const AGENT_POLL_MS = 5000;
 
@@ -199,9 +213,12 @@ function LiveConsole({
   const [auto, setAuto] = useState(true);
   const [copied, setCopied] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
-  const [agent, setAgent] = useState<AgentView>({ rev: 0, alert: null, record: [], degraded: false });
+  const [agent, setAgent] = useState<AgentView>({ rev: 0, alert: null, record: [], degraded: false, prepared: null });
   const [askedCopied, setAskedCopied] = useState(false);
   const [ending, setEnding] = useState(false);
+  // Round trip for the last pointer. A cache hit is a real latency win, so it is measured rather
+  // than asserted.
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
   const idRef = useRef(0);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -346,16 +363,20 @@ function LiveConsole({
       setNote("No transcript yet — once the conversation starts, pointers appear here.");
       return;
     }
+    // The question on its own, so the route can check it against what the background pass
+    // prepared. The blended transcript would match almost anything.
+    const asked = [...linesRef.current].reverse().find((l) => l.speaker !== repName)?.text ?? "";
     inFlightRef.current = true;
     setLoading(true);
     setNote(undefined);
+    const startedRequest = performance.now();
     try {
       const res = await fetch("/api/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // roomId lets the route scope retrieval to the session's product area — the context the
         // rep set at consent and which never reached the AI before.
-        body: JSON.stringify({ transcript, roomId: session.roomId }),
+        body: JSON.stringify({ transcript, roomId: session.roomId, asked }),
       });
       const data = await res.json();
       if (data.note) {
@@ -369,7 +390,11 @@ function LiveConsole({
           comparison: data.comparison || "",
           followUp: data.followUp || "",
           sources: Array.isArray(data.sources) ? data.sources : [],
+          cached: data.cached === true,
+          prepared: data.prepared,
+          unsupportedFigures: Array.isArray(data.unsupportedFigures) ? data.unsupportedFigures : [],
         };
+        setLatencyMs(Math.round(performance.now() - startedRequest));
         setResult(r);
         setUsed(new Set());
         setOpenKey(null);
@@ -386,7 +411,7 @@ function LiveConsole({
       inFlightRef.current = false;
       setLoading(false);
     }
-  }, [session.roomId]);
+  }, [session.roomId, repName]);
 
   useEffect(() => {
     if (!auto) return;
@@ -625,17 +650,36 @@ function LiveConsole({
           <>
             <div className="lb-head">
               <span className="cat">Listening</span>
+              {agent.prepared && <span className="ready">Answer ready</span>}
             </div>
             <div className="concern">
               {note ??
                 "When the customer asks something, the line to say appears here — grounded in the policy documents, with the page it came from."}
             </div>
+            {/* Speculative work, made visible. The background pass has already written and
+                grounding-checked the answer to the question this customer is most likely to ask
+                next, so if it lands there is no model call to wait for. */}
+            {agent.prepared && !note && (
+              <div className="ahead">
+                <span className="k">Prepared for</span>
+                <span className="v">
+                  “{agent.prepared.question}”
+                  <span className="on"> · {agent.prepared.label}</span>
+                </span>
+              </div>
+            )}
           </>
         ) : (
           <div className="pru-enter">
             <div className="lb-head">
               <span className="cat">Detected confusion</span>
-              <span className="conf">{result.sources.length} cited</span>
+              {/* A prepared answer is announced, not slipped in: the rep is reading something
+                  written before the question was asked, and should know it. */}
+              {result.cached && <span className="ready">Prepared · verified</span>}
+              <span className="conf">
+                {result.sources.length} cited
+                {latencyMs !== null && ` · ${latencyMs} ms`}
+              </span>
             </div>
             {result.concern && <div className="concern">{result.concern}</div>}
             <div className="say-wrap">
@@ -650,6 +694,13 @@ function LiveConsole({
                   result.sources.map((s, i) => <span key={i}>{s.source}</span>)
                 ) : (
                   <span>no source returned</span>
+                )}
+                {/* Grounding self-check. It labels rather than blocks — the rep decides what to
+                    say, and a hypothetical figure in a question is legitimate. */}
+                {result.unsupportedFigures.length > 0 && (
+                  <span className="cite-warn">
+                    Not on these pages: {result.unsupportedFigures.join(", ")}
+                  </span>
                 )}
               </div>
             </div>
@@ -731,6 +782,7 @@ const ALERT_CAT: Record<Alert["kind"], string> = {
   misunderstood: "Contradicts the policy",
   divergence: "Qualifier dropped",
   "re-ask": "Asked again",
+  "explain-back": "Teach-back graded",
 };
 
 const MIC_LABEL: Record<DeviceStatus, { text: string; hint: string }> = {

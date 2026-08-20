@@ -37,13 +37,44 @@ export type ConceptEntry = {
   demonstratedAt?: number;
   misunderstoodAt?: number;
   teachBackAskedAt?: number;
+  // The answer to a teach-back is graded once. Without this the same reply would be re-graded on
+  // every pass, spending a model call each time to reach the same verdict.
+  explainBackGradedAt?: number;
   evidence: Evidence[];
   reAsks: number;
 };
 
+// The six fields the live console renders. Produced identically by the live path and by the
+// lookahead, so a cached answer is indistinguishable from a fresh one to the UI.
+export type Pointers = {
+  concern: string;
+  firstStep: string;
+  suggestedLine: string;
+  explainer: string;
+  comparison: string;
+  followUp: string;
+};
+
+export type Source = { source: string; snippet: string };
+
+// A pre-computed, grounding-verified answer to the question this customer is most likely to ask
+// next. Served instantly on a match, which is a real latency win rather than a gesture.
+export type Lookahead = {
+  conceptId: string;
+  label: string;
+  question: string; // the expected question, in the customer's likely words
+  pointers: Pointers;
+  sources: Source[];
+  citations: string[];
+  toolCalls: string[]; // what the tool loop actually did, for the console's provenance line
+  verified: boolean;
+  preparedAt: number;
+  rev: number; // the ledger revision it was prepared against
+};
+
 // What the rep is shown mid-call. One at a time, highest risk first — a second alert competing
 // for attention during a live conversation is worse than no alert.
-export type AlertKind = "false-assent" | "misunderstood" | "divergence" | "re-ask";
+export type AlertKind = "false-assent" | "misunderstood" | "divergence" | "re-ask" | "explain-back";
 
 export type Alert = {
   kind: AlertKind;
@@ -74,6 +105,13 @@ export type AgentState = {
   alert: Alert | null;
   dismissed: string[]; // concept ids the rep has waved off; no alert re-fires for them
   degraded: boolean; // true when embeddings were unavailable and detection ran on keywords
+  lookahead: Lookahead | null;
+  // When preparation was last attempted, successful or not. Without it a run that keeps returning
+  // null (nothing worth preparing, or an answer that failed verification) would retry every pass.
+  lookaheadTriedAt: number;
+  // Background model calls spent on this session, against MAX_BACKGROUND_CALLS. Grading and
+  // lookahead stop when it runs out; the deterministic detectors carry on.
+  backgroundCalls: number;
 };
 
 export function emptyState(roomId: string, productArea: string): AgentState {
@@ -87,6 +125,9 @@ export function emptyState(roomId: string, productArea: string): AgentState {
     alert: null,
     dismissed: [],
     degraded: false,
+    lookahead: null,
+    lookaheadTriedAt: 0,
+    backgroundCalls: 0,
   };
 }
 

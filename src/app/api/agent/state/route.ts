@@ -14,12 +14,21 @@ export const maxDuration = 60;
 // product — the customer never sees any of it, and never knows it exists.
 
 function view(state: AgentState) {
-  return { rev: state.rev, alert: state.alert, degraded: state.degraded, record: buildRecord(state) };
+  const l = state.lookahead;
+  return {
+    rev: state.rev,
+    alert: state.alert,
+    degraded: state.degraded,
+    record: buildRecord(state),
+    // What the background pass is holding an answer for. Surfaced while idle so the rep can see
+    // the assistant is ahead of the conversation rather than only noticing when it lands.
+    prepared: l ? { label: l.label, question: l.question, at: l.preparedAt, toolCalls: l.toolCalls } : null,
+  };
 }
 
 // No session record means the shared store is unavailable, not that the room is fake. Say so
 // rather than returning an empty ledger, which would read as "the customer understood nothing".
-const UNAVAILABLE = { unavailable: true, rev: 0, alert: null, degraded: true, record: [] };
+const UNAVAILABLE = { unavailable: true, rev: 0, alert: null, degraded: true, record: [], prepared: null };
 
 // Only the shape is trusted; the values are whatever the browser captured.
 function parseTurns(raw: unknown): Turn[] {

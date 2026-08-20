@@ -68,6 +68,9 @@ export function applyDetections(state: AgentState, detections: Detection[]): Age
       if (e.evidence.length > EVIDENCE_PER_CONCEPT) e.evidence = e.evidence.slice(-EVIDENCE_PER_CONCEPT);
       if (d.kind === "re-ask") e.reAsks += 1;
     }
+    // Graded once, whatever the verdict: without this the same answer is re-graded on every pass,
+    // spending a model call each time to reach the same conclusion.
+    if (d.kind === "explain-back") e.explainBackGradedAt = d.at;
 
     if (d.argues && RANK[d.argues] >= RANK[e.state]) {
       // A concept the customer engages with before the rep names it is still raised.
@@ -101,7 +104,8 @@ export function applyActs(state: AgentState, acts: RepAct[]): AgentState {
 
 // Highest risk first. A second alert competing for attention mid-conversation is worse than none.
 const PRIORITY: Record<Alert["kind"], number> = {
-  misunderstood: 4,
+  misunderstood: 5,
+  "explain-back": 4,
   divergence: 3,
   "false-assent": 2,
   "re-ask": 1,
@@ -111,6 +115,8 @@ function headline(kind: Alert["kind"], c: Concept): string {
   switch (kind) {
     case "misunderstood":
       return "That is not what the policy says.";
+    case "explain-back":
+      return "They got part of it.";
     case "divergence":
       return "They dropped the part that changes the answer.";
     case "false-assent":
@@ -156,13 +162,19 @@ export function chooseAlert(state: AgentState): Alert | null {
     const latest = spoken[spoken.length - 1];
     if (!latest) continue;
     // One turn can trip several detectors. Lead with the one that names what was actually wrong,
-    // not the one that happened to be pushed last.
+    // not the one that happened to be pushed last. A graded answer outranks a similarity score,
+    // because it was checked against the clause rather than measured against a paraphrase.
     const sameTurn = spoken.filter((x) => x.at === latest.at);
-    const last = sameTurn.find((x) => x.signal === "uptake") ?? latest;
+    const last =
+      sameTurn.find((x) => x.signal === "explain-back") ?? sameTurn.find((x) => x.signal === "uptake") ?? latest;
 
     let kind: Alert["kind"] | null = null;
     if (e.state === "misunderstood") {
       kind = last.signal === "divergence" ? "divergence" : "misunderstood";
+    } else if (last.signal === "explain-back" && e.state !== "demonstrated") {
+      // A graded-partial answer: the rep asked, the customer half-answered, and the ledger can
+      // name the half that is missing. That is more useful than repeating the original alert.
+      kind = "explain-back";
     } else if (e.state === "asserted" && !e.demonstratedAt) {
       kind = "false-assent";
     } else if (e.reAsks > 1 && e.state !== "demonstrated") {
@@ -221,13 +233,22 @@ export function buildRecord(state: AgentState): RecordRow[] {
       unseen: [],
       raised: [],
       asserted: ["assent"],
-      demonstrated: ["uptake"],
-      misunderstood: ["uptake", "divergence"],
+      demonstrated: ["explain-back", "uptake"],
+      misunderstood: ["explain-back", "uptake", "divergence"],
     };
-    // `raised` and `unseen` have no customer evidence by definition. Quoting a later question
-    // there would read as though the customer had shown something, which is the opposite.
-    const own = causing[st].length ? spoken.find((x) => causing[st].includes(x.signal)) : undefined;
-    const risk = st === "unseen" && !c.material ? "" : RISK[st];
+    // A graded teach-back is the strongest evidence there is — the customer explaining it in their
+    // own words, checked against the clause — so it is quoted whenever one exists.
+    // Otherwise: `raised` and `unseen` have no customer evidence by definition, and quoting a later
+    // question there would read as though the customer had shown something, which is the opposite.
+    const explained = spoken.find((x) => x.signal === "explain-back");
+    const own = explained ?? (causing[st].length ? spoken.find((x) => causing[st].includes(x.signal)) : undefined);
+    // A partial answer says far more than "agreed, never demonstrated" — it names what is missing.
+    const risk =
+      st === "unseen" && !c.material
+        ? ""
+        : explained && st !== "demonstrated"
+          ? explained.detail || RISK[st]
+          : RISK[st];
     return {
       conceptId: c.id,
       label: c.label,

@@ -1,0 +1,223 @@
+/**
+ * Unit checks for the parts of the agent that are pure functions — the state machine's rank
+ * guard, the grounding figure check, the risk ranking, the record builder, and the cache gate.
+ *
+ *   npm run check
+ *
+ * Deliberately dependency-free: node:test is built in, and adding a test framework to a hackathon
+ * repo the day before the demo is not the trade this needs. The replay harness covers behaviour
+ * end to end; this covers the pieces where a wrong edge case would be invisible there.
+ *
+ * Everything here runs offline except one cache check, which is skipped without GEMINI_API_KEY.
+ */
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+delete process.env.UPSTASH_REDIS_REST_URL;
+delete process.env.UPSTASH_REDIS_REST_TOKEN;
+
+const { CONCEPTS, conceptById } = await import("../src/lib/concepts.ts");
+const { clauseById } = await import("../src/lib/knowledge.ts");
+const { applyDetections, buildRecord, chooseAlert } = await import("../src/lib/agent/ledger.ts");
+const { rankByRisk } = await import("../src/lib/agent/lookahead.ts");
+const { matchesLookahead } = await import("../src/lib/agent/cache.ts");
+const { isBareAssent, isQuestion } = await import("../src/lib/agent/signals.ts");
+const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
+const { emptyState } = await import("../src/lib/agent/types.ts");
+
+type Detection = import("../src/lib/agent/signals.ts").Detection;
+type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
+
+const AREA = "Health Protection";
+const AT = Date.UTC(2026, 7, 20, 6, 30, 0);
+
+function detection(over: Partial<Detection>): Detection {
+  return {
+    conceptId: "deductible-definition",
+    kind: "uptake",
+    argues: "raised",
+    turnIndex: 0,
+    at: AT,
+    quote: "q",
+    detail: "d",
+    score: 1,
+    ...over,
+  };
+}
+
+/* ---------- the concept map has to stay citable ---------- */
+
+test("every concept anchors to clauses that exist", () => {
+  for (const c of CONCEPTS) {
+    assert.ok(c.clauseIds.length > 0, `${c.id} has no clause ids`);
+    for (const id of c.clauseIds) assert.ok(clauseById(id), `${c.id} cites missing clause ${id}`);
+    assert.ok(c.misconceptions.length > 0, `${c.id} has no misconceptions to detect`);
+    assert.ok(c.teachBack.trim().length > 0, `${c.id} has no teach-back question`);
+  }
+});
+
+/* ---------- the rank guard is the whole state machine ---------- */
+
+test("assent never downgrades a demonstrated concept", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [detection({ argues: "demonstrated", kind: "uptake" })]);
+  s = applyDetections(s, [detection({ argues: "asserted", kind: "assent", at: AT + 1000, turnIndex: 1 })]);
+  assert.equal(s.concepts["deductible-definition"].state, "demonstrated");
+});
+
+test("a later misconception overrides an earlier demonstration", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [detection({ argues: "demonstrated" })]);
+  s = applyDetections(s, [detection({ argues: "misunderstood", at: AT + 1000, turnIndex: 1 })]);
+  assert.equal(s.concepts["deductible-definition"].state, "misunderstood");
+});
+
+test("re-scoring the same turn does not stack duplicate evidence", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [detection({ argues: "asserted", kind: "assent" })]);
+  s = applyDetections(s, [detection({ argues: "asserted", kind: "assent" })]);
+  assert.equal(s.concepts["deductible-definition"].evidence.length, 1);
+});
+
+test("a graded teach-back is recorded once", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [detection({ kind: "explain-back", argues: "demonstrated" })]);
+  assert.equal(s.concepts["deductible-definition"].explainBackGradedAt, AT);
+});
+
+/* ---------- alerts ---------- */
+
+test("a bare assent raises a false-assent alert; a dismissal silences it", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [
+    detection({ argues: "raised" }),
+    detection({ argues: "asserted", kind: "assent", at: AT + 1000, turnIndex: 1 }),
+  ]);
+  assert.equal(chooseAlert(s)?.kind, "false-assent");
+  assert.equal(chooseAlert({ ...s, dismissed: ["deductible-definition"] }), null);
+});
+
+test("an alert never fires without something the customer said", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [detection({ argues: "raised" })]);
+  assert.equal(chooseAlert(s), null);
+});
+
+/* ---------- the record ---------- */
+
+test("the record quotes the customer only where they showed something", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [detection({ argues: "raised" })]);
+  const raised = buildRecord(s).find((r) => r.conceptId === "deductible-definition")!;
+  assert.equal(raised.quote, "");
+  assert.equal(raised.state, "raised");
+
+  s = applyDetections(s, [
+    detection({ argues: "asserted", kind: "assent", at: AT + 1000, turnIndex: 1, quote: "okay" }),
+  ]);
+  const asserted = buildRecord(s).find((r) => r.conceptId === "deductible-definition")!;
+  assert.equal(asserted.quote, "okay");
+  assert.match(asserted.risk, /never demonstrated/);
+});
+
+test("material concepts that never came up are flagged, optional ones are not", () => {
+  const rows = buildRecord(emptyState("r", AREA));
+  const material = rows.find((r) => r.conceptId === "panel-providers")!;
+  const optional = rows.find((r) => r.conceptId === "limits-of-cover")!;
+  assert.equal(material.state, "unseen");
+  assert.match(material.risk, /Not covered/);
+  assert.equal(optional.risk, "");
+});
+
+/* ---------- lookahead risk order ---------- */
+
+test("risk order puts a misconception above a bare assent, and both above silence", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [
+    detection({ conceptId: "panel-providers", argues: "misunderstood" }),
+    detection({ conceptId: "co-insurance", argues: "raised", turnIndex: 1, at: AT + 1000 }),
+    detection({ conceptId: "co-insurance", argues: "asserted", kind: "assent", turnIndex: 2, at: AT + 2000 }),
+  ]);
+  const order = rankByRisk(s).map((c) => c.id);
+  assert.equal(order[0], "panel-providers");
+  assert.equal(order[1], "co-insurance");
+  assert.ok(order.includes("stop-loss"), "a material concept never raised is still worth preparing");
+});
+
+test("a demonstrated concept is not worth preparing for", () => {
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [detection({ conceptId: "stop-loss", argues: "demonstrated" })]);
+  assert.ok(!rankByRisk(s).some((c) => c.id === "stop-loss"));
+});
+
+/* ---------- grounding: the figures have to come from the pages ---------- */
+
+test("figures present in the cited clauses pass", () => {
+  const clauses = [clauseById("deductible-amounts")!];
+  assert.deepEqual(unsupportedFigures("The A ward deductible is S$3,500 per policy year.", clauses), []);
+});
+
+test("a figure that is nowhere in the clauses is reported", () => {
+  const clauses = [clauseById("deductible-amounts")!];
+  assert.deepEqual(unsupportedFigures("The A ward deductible is S$4,250.", clauses), ["4250"]);
+});
+
+test("small numbers and years are not treated as policy figures", () => {
+  const clauses = [clauseById("co-insurance")!];
+  assert.deepEqual(unsupportedFigures("There are 3 tiers, revised in 2026.", clauses), []);
+});
+
+/* ---------- utterance shape ---------- */
+
+test("bare assent is assent and nothing more", () => {
+  assert.equal(isBareAssent("Okay, yeah, that makes sense."), true);
+  assert.equal(isBareAssent("Right, okay."), true);
+  assert.equal(isBareAssent("Yes — so I pay the first chunk myself each year."), false);
+  assert.equal(isBareAssent("What happens if I go private?"), false);
+});
+
+test("questions are recognised with and without the question mark", () => {
+  assert.equal(isQuestion("how much would I pay"), true);
+  assert.equal(isQuestion("so any hospital is fine then?"), true);
+  assert.equal(isQuestion("so any hospital is fine then"), false);
+});
+
+/* ---------- the cache gate ---------- */
+
+function lookahead(over: Partial<Lookahead> = {}): Lookahead {
+  const c = conceptById("panel-providers")!;
+  return {
+    conceptId: c.id,
+    label: c.label,
+    question: "Is the coverage the same whichever hospital I go to?",
+    pointers: { concern: "", firstStep: "", suggestedLine: "line", explainer: "", comparison: "", followUp: "" },
+    sources: [],
+    citations: [],
+    toolCalls: [],
+    verified: true,
+    preparedAt: Date.now(),
+    rev: 1,
+    ...over,
+  };
+}
+
+test("an unrelated question never hits the cache", async () => {
+  const r = await matchesLookahead(lookahead(), "Can I pay the premium from MediSave?");
+  assert.equal(r.hit, false);
+});
+
+test("a stale or unverified answer is never served", async () => {
+  assert.equal((await matchesLookahead(lookahead({ preparedAt: 0 }), "Is the coverage the same whichever hospital I go to?")).hit, false);
+  assert.equal((await matchesLookahead(lookahead({ verified: false }), "Is the coverage the same whichever hospital I go to?")).hit, false);
+  assert.equal((await matchesLookahead(null, "anything")).hit, false);
+});
+
+test(
+  "the question it was prepared for hits",
+  { skip: process.env.GEMINI_API_KEY ? false : "needs embeddings" },
+  async () => {
+    const r = await matchesLookahead(lookahead(), "So is the cover the same no matter which hospital I go to?");
+    assert.equal(r.hit, true, `expected a hit, scored ${r.score}`);
+  },
+);

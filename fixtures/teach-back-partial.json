@@ -1,0 +1,20 @@
+{
+  "name": "The teach-back is asked, and half-answered",
+  "productArea": "Health Protection",
+  "expect": "deductible-definition:asserted",
+  "expectAlert": "explain-back",
+  "needsAi": true,
+  "note": "The rep presses 'Asked it' on the alert; the customer's next answer is graded against the clause. Getting the deductible right but missing that it is once a year is a partial, so the state does not advance.",
+  "turns": [
+    { "t": "00:38", "role": "rep", "text": "So before we look at the plans, the piece everyone trips over is the deductible. That is the amount you pay yourself first, once per policy year, before MediShield Life or PRUShield pays anything at all." },
+    { "t": "00:43", "role": "customer", "text": "Okay, yeah, that makes sense." },
+    {
+      "t": "00:52",
+      "role": "rep",
+      "text": "Just so I know I explained it well — if your bill came to S$8,000 at a panel hospital, what would you expect to pay first, and who pays the rest?",
+      "act": "teach-back-asked",
+      "conceptId": "deductible-definition"
+    },
+    { "t": "01:06", "role": "customer", "text": "I'd pay some amount at the start and then the insurance takes over, and I'd be paying that same amount again each time I go in." }
+  ]
+}

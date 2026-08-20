@@ -18,8 +18,11 @@ Built for the **PolyFinTech API100 Hackathon 2026** (Prudential "Insurance Navig
 2. They send the customer a **private link**. The customer opens it, consents to recording, and joins the video call — seeing **video only**, never the AI or the transcript.
 3. Each browser transcribes its **own** microphone with the Web Speech API. The customer's words travel privately to the rep over LiveKit's data channel.
 4. When the customer asks something, PRUAssist retrieves the relevant policy clauses and Gemini writes **one line to say**, grounded in those clauses and shown with its page citation — privately, on the rep's screen.
-5. In parallel, a slower pass tracks **what the customer has actually demonstrated** — not what they agreed to. When someone says "okay, that makes sense" without ever using the idea in their own words, the rep is told so privately, and given the question that would settle it.
-6. On ending the session, the transcript is summarised into an **advisor brief**, and the comprehension evidence becomes an **Understanding Record**: per concept, what state it reached, the customer's own timestamped words, and the brochure pages it was grounded in.
+5. If the customer asks the question the background pass was already expecting, the answer is
+   served from cache — **written and grounding-checked before the question was asked**, so there is
+   no model call to wait for.
+6. In parallel, a slower pass tracks **what the customer has actually demonstrated** — not what they agreed to. When someone says "okay, that makes sense" without ever using the idea in their own words, the rep is told so privately, and given the question that would settle it.
+7. On ending the session, the transcript is summarised into an **advisor brief**, and the comprehension evidence becomes an **Understanding Record**: per concept, what state it reached, the customer's own timestamped words, and the brochure pages it was grounded in.
 
 ## Routes
 
@@ -122,11 +125,52 @@ Word overlap gets that case right. So `misunderstood` requires **both** readings
 `demonstrated` needs only one — a wrong "they're confused" costs far more than a teach-back the rep
 did not need. Thresholds come from [`scripts/scores.mts`](scripts/scores.mts), not intuition.
 
+**The teach-back loop.** When the rep presses "Asked it" on an alert, the customer's next
+substantive reply is graded against the clause by a small judge, and the grade names *which part*
+was wrong rather than returning a score — "they have the deductible, but they think it is charged
+on every claim rather than once a year" is actionable; "62%" is not. `correct` moves the concept to
+`demonstrated`, `wrong` to `misunderstood`, and `partial` leaves the state alone but puts the
+missing half on the record. Each answer is graded exactly once.
+
+**Lookahead — speculative execution for a conversation.** The commodity version of this predicts a
+generic next question. This one is aimed at *this* customer's unresolved concepts: the ledger is
+ranked by risk (got it wrong > agreed without showing > material and never raised), and the
+background pass runs a tool loop over that concept, writes the answer, and grounding-checks it
+before caching. When the question actually arrives, `/api/assist` serves it with no model call —
+a measured latency win, shown in the console rather than hidden, because the rep is reading
+something written before the question was asked.
+
+The tool loop is written by hand, which is not a stylistic choice: `@google/genai` decides a tool is
+callable with `'callTool' in tool`, and a `Tool` built from `{ functionDeclarations }` has no such
+method, so automatic function calling is off and the model's calls come back unexecuted. It runs in
+two phases because tools and `responseSchema` cannot be combined — phase one is tools-on and
+free-form, phase two synthesises from a **fresh** `contents` with no function-call parts in it. The
+model turn is echoed back verbatim so `gemini-2.5`'s `thoughtSignature` survives the round trip.
+`estimate_premium` is deliberately not a tool: the corpus describes premiums qualitatively and has
+no rate tables, so it could only fabricate figures next to a real page citation.
+
+**Grounding self-verification, at two speeds.** On the background path the whole answer is checked
+by a model before it is cached — an unverified answer is dropped rather than served instantly with a
+citation. On the live path there is no time for a second call, so the check is deterministic and
+aimed at the failure that matters most: every figure in the suggested line must appear in the cited
+clauses, or it is labelled. It labels rather than blocks; a hypothetical the rep offers the customer
+is legitimate, and the rep decides what to say.
+
 **Two speeds.** `/api/agent/state` returns the ledger as it stands and schedules the scoring pass with
 `after()` from `next/server`, so it runs once the response is flushed. The rep's view is one cycle
 behind the scoring and never waits on it. The pass is debounced per room, and rep actions ("Asked
 it", "Not now") are appended to their own key so they can never race it. Set `PRUASSIST_DEEP=0` to
-turn the whole thing off without a deploy.
+turn the whole thing off without a deploy, or `PRUASSIST_LOOKAHEAD=0` to keep comprehension tracking
+and drop only the expensive stage.
+
+**What it costs, and the ceiling on it.** Free-tier Gemini quota is per project *per model per day*
+— 20 `generateContent` requests/day on `gemini-2.5-flash` at the time of writing, and a single
+lookahead can spend a third of that. So the background work is bounded rather than trusted: at most
+3 tool steps per lookahead, one lookahead per room per 25 seconds, and a hard ceiling of 60
+background model calls for a whole session. When that ceiling is reached the deterministic detectors
+carry on, because they cost nothing. `PRUASSIST_MODEL` swaps the model without a code change, and
+the thinking configuration adapts to the family — the 2.5 series takes `thinkingBudget` and rejects
+`thinkingLevel`, the 3.x series is the other way round and returns a bare 400 for the wrong one.
 
 ### Running it without a browser
 
@@ -146,9 +190,23 @@ are bad — browser speech recognition on venue wifi is not something to stake a
 npm run replay:all
 ```
 
-The five fixtures cover a false assent, the panel-provider misconception, a re-asked question, a
-correct explain-back, and small talk the assistant must stay silent through. Each one declares the
-state it expects, so the run exits non-zero when a change breaks one.
+The seven fixtures cover a false assent, the panel-provider misconception, a re-asked question, a
+correct explain-back, a teach-back answered correctly, a teach-back half-answered, and small talk
+the assistant must stay silent through. Each declares the state it expects, so the run exits
+non-zero when a change breaks one. The two teach-back fixtures need a model and are skipped rather
+than failed under `--no-ai`.
+
+`--lookahead` additionally runs the background pass at the end of a fixture and prints the risk
+order, the question it expects next, the tool calls it actually made, and whether the answer passed
+grounding verification. It is opt-in because it is several model calls.
+
+The pure functions — the state machine's rank guard, the risk ranking, the record builder, the
+grounding figure check and the cache gate — have their own checks, which run offline in about a
+second:
+
+```bash
+npm run check
+```
 
 ## Video and transcription
 
@@ -167,5 +225,9 @@ The interface is one warm paper world — a marked-up policy brochure. Typograph
 - **Privacy of speech.** The Web Speech API sends audio to the browser's speech service (Google, in Chrome). The consent copy covers recording and transcription; an on-device path such as faster-whisper would remove that dependency.
 - **Sessions expire after 24 hours.** The raw transcript is never persisted — it lives in the rep's browser and is discarded when they leave the page. The concept ledger does persist **short quotes tied to a specific policy concept**, because those quotes are the Understanding Record; both consent screens say so, and the keys are deleted when the session ends.
 - **Comprehension is inferred from language and timing only.** The Web Speech API returns words and timestamps, not tone or hesitation, so there is no prosody anywhere in this system. Response latency is corroborating evidence in the alert copy and never changes a concept's state — network jitter and voice-activity endpointing both distort it.
+- **The background work is bounded, not trusted.** Free-tier Gemini quota is 20 requests/day per
+  model at the time of writing. At most 3 tool steps per lookahead, one lookahead per room per 25
+  seconds, and 60 background model calls per session; past that the deterministic detectors carry
+  on alone. Confirm the quota on the key you are demoing with.
 - **`misunderstood` means "said something matching a known misconception"**, not "does not understand". The misconceptions are authored in [`src/lib/concepts.ts`](src/lib/concepts.ts): the system detects known wrong framings, not arbitrary ones. The record states what was observed and never returns a verdict on a person.
 - **Vercel's Hobby plan is non-commercial.** Fine for a hackathon; a commercial deployment needs Pro.

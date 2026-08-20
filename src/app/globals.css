@@ -632,6 +632,53 @@ button {
   line-height: 1.45;
   margin-bottom: 10px;
 }
+/* Speculative work that has already been checked — the consent stamp, not the highlighter. */
+.lb-head .ready,
+.comp-h .ready {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--stamp);
+  background: var(--stamp-wash);
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+}
+.ahead {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule-soft);
+}
+.ahead .k {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pencil);
+  flex: none;
+}
+.ahead .v {
+  font-family: var(--font-spoken);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink-3);
+  min-width: 0;
+}
+.ahead .on {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--pencil);
+}
+/* The grounding self-check speaks in the margin, beside the citation it qualifies. */
+.cite-warn {
+  display: block;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--rule-soft);
+  color: var(--pru);
+}
 .concern b {
   color: var(--ink-2);
   font-weight: 500;
