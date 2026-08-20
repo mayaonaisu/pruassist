@@ -1,6 +1,7 @@
 /**
  * Unit checks for the parts of the agent that are pure functions — the state machine's rank
- * guard, the grounding figure check, the risk ranking, the record builder, and the cache gate.
+ * guard, the scoring pass, the grounding figure check, the risk ranking, the record builder, and
+ * the cache gate.
  *
  *   npm run check
  *
@@ -17,9 +18,10 @@ import assert from "node:assert/strict";
 delete process.env.UPSTASH_REDIS_REST_URL;
 delete process.env.UPSTASH_REDIS_REST_TOKEN;
 
-const { CONCEPTS, conceptById } = await import("../src/lib/concepts.ts");
+const { CONCEPTS, conceptById, conceptsForArea } = await import("../src/lib/concepts.ts");
+const { scorePass } = await import("../src/lib/agent/score.ts");
 const { clauseById } = await import("../src/lib/knowledge.ts");
-const { applyDetections, buildRecord, chooseAlert } = await import("../src/lib/agent/ledger.ts");
+const { applyActs, applyDetections, buildRecord, chooseAlert } = await import("../src/lib/agent/ledger.ts");
 const { rankByRisk } = await import("../src/lib/agent/lookahead.ts");
 const { matchesLookahead } = await import("../src/lib/agent/cache.ts");
 const { isBareAssent, isQuestion } = await import("../src/lib/agent/signals.ts");
@@ -28,6 +30,7 @@ const { emptyState } = await import("../src/lib/agent/types.ts");
 
 type Detection = import("../src/lib/agent/signals.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
+type Turn = import("../src/lib/agent/types.ts").Turn;
 
 const AREA = "Health Protection";
 const AT = Date.UTC(2026, 7, 20, 6, 30, 0);
@@ -181,6 +184,59 @@ test("questions are recognised with and without the question mark", () => {
   assert.equal(isQuestion("how much would I pay"), true);
   assert.equal(isQuestion("so any hospital is fine then?"), true);
   assert.equal(isQuestion("so any hospital is fine then"), false);
+});
+
+/* ---------- the scoring pass ---------- */
+
+const POOL = conceptsForArea(AREA);
+
+function turn(role: "rep" | "customer", text: string, offsetSeconds: number): Turn {
+  return { at: AT + offsetSeconds * 1000, role, speaker: role, text };
+}
+
+const EXPLAINED = turn("rep", "The deductible is the amount you pay yourself first, once per policy year, before MediShield Life or PRUShield pays anything.", 0);
+const AGREED = turn("customer", "Okay, yeah, that makes sense.", 8);
+const ASKED_LATER = turn("customer", "How much would I actually have to pay upfront on the day?", 40);
+
+test("scorePass scores only what is past the cursor, and advances it", async () => {
+  const first = await scorePass({ state: emptyState("r", AREA), turns: [EXPLAINED, AGREED], pool: POOL, budget: 0 });
+  assert.equal(first.scoredFrom, 0);
+  assert.ok(first.detections.length > 0);
+  assert.equal(first.state.cursorAt, AGREED.at);
+
+  // Same turns again: nothing is new, so nothing is scored and the caller can skip the write.
+  const again = await scorePass({ state: first.state, turns: [EXPLAINED, AGREED], pool: POOL, budget: 0 });
+  assert.equal(again.scoredFrom, -1);
+  assert.deepEqual(again.detections, []);
+  assert.equal(again.changed, false);
+
+  // One more turn: only that turn is scored, not the whole window again.
+  const third = await scorePass({
+    state: first.state,
+    turns: [EXPLAINED, AGREED, ASKED_LATER],
+    pool: POOL,
+    budget: 0,
+  });
+  assert.equal(third.scoredFrom, 2);
+  // Non-vacuous: the third turn does produce detections, so `every` below is actually testing.
+  assert.ok(third.detections.length > 0);
+  assert.ok(third.detections.every((d) => d.at === ASKED_LATER.at), "re-scored a turn already behind the cursor");
+  assert.equal(third.state.cursorAt, ASKED_LATER.at);
+});
+
+test("at zero budget the detectors still run but nothing is graded", async () => {
+  // A concept with an outstanding teach-back and a substantive answer after it — the one shape
+  // that would spend a model call. Without GEMINI_API_KEY the grader declines anyway, so this
+  // pins the gate rather than the grader: the assertion is that no explain-back reaches the
+  // ledger, and that the deterministic detectors are unaffected by the budget being spent.
+  let state = emptyState("r", AREA);
+  state = applyActs(state, [{ type: "teach-back-asked", conceptId: "deductible-definition", at: AT }]);
+
+  const answered = turn("customer", "I would cover the first slice myself and then the insurance takes over.", 20);
+  const scored = await scorePass({ state, turns: [EXPLAINED, answered], pool: POOL, budget: 0 });
+
+  assert.ok(scored.detections.length > 0, "detectors are not gated by the model budget");
+  assert.ok(!scored.detections.some((d) => d.kind === "explain-back"), "graded with no budget for it");
 });
 
 /* ---------- the cache gate ---------- */

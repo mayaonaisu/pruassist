@@ -37,10 +37,9 @@ delete process.env.KV_REST_API_TOKEN;
 if (noAi) delete process.env.GEMINI_API_KEY;
 
 const { conceptsForArea } = await import("../src/lib/concepts.ts");
-const { applyActs, applyDetections, buildRecord, chooseAlert, sameAlert } = await import("../src/lib/agent/ledger.ts");
-const { gradeTeachBacks } = await import("../src/lib/agent/judge.ts");
+const { applyActs, buildRecord, sameAlert } = await import("../src/lib/agent/ledger.ts");
 const { prepareLookahead, rankByRisk } = await import("../src/lib/agent/lookahead.ts");
-const { runSignals } = await import("../src/lib/agent/signals.ts");
+const { scorePass } = await import("../src/lib/agent/score.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
 type Turn = import("../src/lib/agent/types.ts").Turn;
 type AgentState = import("../src/lib/agent/types.ts").AgentState;
@@ -135,12 +134,12 @@ async function replay(file: string): Promise<boolean | null> {
     }
 
     const before = new Map(Object.entries(state.concepts).map(([k, v]) => [k, v.state]));
-    const { detections: signalled } = await runSignals(turns.slice(0, i + 1), pool, i);
-    // Graded last so it lands after the detectors for the same turn — a judgement made against the
-    // clause overrides a similarity score.
-    const graded = await gradeTeachBacks(state, turns.slice(0, i + 1));
-    const detections = [...signalled, ...graded];
-    state = applyDetections(state, detections);
+    // The same call production makes, with the same cursor semantics — the turns so far, and a
+    // ledger whose cursorAt sits on the previous one. Budget is unbounded here: the harness is
+    // meant to exercise every stage, and it is not spending a live session's quota.
+    const scored = await scorePass({ state, turns: turns.slice(0, i + 1), pool, budget: Infinity });
+    const detections = scored.detections;
+    state = scored.state;
 
     for (const d of detections) {
       // What the ledger applied, not what the detector argued: `asserted → raised` is a
@@ -155,8 +154,7 @@ async function replay(file: string): Promise<boolean | null> {
       );
     }
 
-    const alert = chooseAlert(state);
-    state = { ...state, alert };
+    const alert = state.alert;
     if (alert && !sameAlert(alert, shown)) {
       alerts++;
       console.log("");
