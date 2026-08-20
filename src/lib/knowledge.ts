@@ -7,6 +7,19 @@ export function knowledgeDocuments(): string[] {
   return [...new Set(KNOWLEDGE.map((c) => c.source.split(" · ")[0]))];
 }
 
+// Advisory areas the rep can pick, derived from the documents actually indexed.
+const DOCUMENT_AREA: Record<string, string> = {
+  "PRUShield Product Brochure (Apr 2026)": "Health Protection",
+  "PRUActive Protect Brochure": "Critical Illness",
+  "PRUPersonal Accident Brochure": "Personal Accident",
+  "PRUActive Term Brochure": "Term Life",
+  "PRUActive Retirement II Brochure": "Retirement",
+};
+
+export function productAreas(): string[] {
+  return [...new Set(knowledgeDocuments().map((d) => DOCUMENT_AREA[d]).filter(Boolean))];
+}
+
 // One row per document with the clause count and page span the retriever can cite.
 export type DocumentIndex = { doc: string; clauses: number; pages: string };
 

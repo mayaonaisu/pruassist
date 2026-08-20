@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SessionInfo } from "@/lib/console-types";
 import DocumentsInScope from "../DocumentsInScope";
+import { productAreas } from "@/lib/knowledge";
 
 const FOCUS = [
   "policy differences",
@@ -11,7 +12,7 @@ const FOCUS = [
   "objections",
   "claim scenarios",
 ];
-const PRODUCT_AREA = "Health Protection";
+const AREAS = productAreas();
 
 // Reads the selection back as speech, since the sentence above is what the rep will say.
 function asPhrase(items: string[]): string {
@@ -31,6 +32,7 @@ export default function ConsentStep({
 }) {
   const [agree, setAgree] = useState(false);
   const [signature, setSignature] = useState(repName === "Representative" ? "" : repName);
+  const [productArea, setProductArea] = useState(AREAS[0] ?? "Health Protection");
   const [focus, setFocus] = useState<string[]>(FOCUS.slice(0, 2));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -45,7 +47,7 @@ export default function ConsentStep({
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productArea: PRODUCT_AREA, focus, repName: signature.trim() }),
+        body: JSON.stringify({ productArea, focus, repName: signature.trim() }),
       });
       // /rep is gated on page load only, so an 8-hour-old console fails here rather than earlier.
       if (res.status === 401) {
@@ -56,7 +58,7 @@ export default function ConsentStep({
         const data = await res.json().catch(() => ({}));
         throw new Error(typeof data.error === "string" ? data.error : "Could not start the session.");
       }
-      onStarted({ ...(await res.json()), productArea: PRODUCT_AREA, focus });
+      onStarted({ ...(await res.json()), productArea, focus });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start the session.");
       setBusy(false);
@@ -75,9 +77,27 @@ export default function ConsentStep({
 
       {/* The configuration reads as a sentence the rep would actually say. */}
       <p className="sentence">
-        Today&rsquo;s session covers <span className="slot">{PRODUCT_AREA}</span>, focusing on{" "}
+        Today&rsquo;s session covers <span className="slot">{productArea}</span>, focusing on{" "}
         <span className="slot multi">{asPhrase(focus)}</span>.
       </p>
+
+      <div className="sec">
+        <div className="sec-h">Product area</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {AREAS.map((a) => (
+            <button
+              key={a}
+              type="button"
+              aria-pressed={a === productArea}
+              className={`pru-chip ${a === productArea ? "on" : ""}`}
+              onClick={() => setProductArea(a)}
+            >
+              {a === productArea ? "✓ " : ""}
+              {a}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="sec">
         <div className="sec-h">Meeting focus</div>
