@@ -146,6 +146,18 @@ if (state.alert) {
   const gradedRow = row(graded, "deductible-definition");
   check("the teach-back answer is graded to demonstrated", gradedRow?.state === "demonstrated", gradedRow?.state);
   check("a demonstrated concept leaves nothing open", gradedRow?.risk === "", `"${gradedRow?.risk}"`);
+
+  const withReadiness = await read(session.roomId);
+  check("readiness rides the state poll", Boolean(withReadiness.readiness), withReadiness.readiness?.question);
+  if (withReadiness.readiness) {
+    const r = withReadiness.readiness;
+    check("readiness names its options", r.options.length >= 2, r.options.map((o) => o.label).join(" · "));
+    check(
+      "readiness reports what is still open",
+      r.ready === false && r.open.length + r.blocking.length > 0,
+      `${r.settled}/${r.total} settled, next: ${r.nextQuestion?.slice(0, 60)}`,
+    );
+  }
 }
 
 await fetch(`${BASE}/api/session/end`, {

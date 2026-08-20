@@ -182,6 +182,18 @@ Every key has to be able to reach the model, which is why the default is `gemini
 than the 2.5 series: a key issued to a newly created project cannot use `gemini-2.5-flash` and would
 404 on every call.
 
+### From understanding to a decision
+
+A representative cannot responsibly recommend Premier over Plus until the customer has demonstrated
+the concepts that *differentiate* them. The console shows the comparison in play and tags every
+deciding concept with its ledger state, so "ready to recommend" means something specific: no
+outstanding misconception, and every differentiator shown rather than agreed to.
+
+When the customer asks a comparative question, the answer is generated under an instruction that is
+handed that same standing and required to name what is not yet settled. A clean feature table would
+be the easy answer and the wrong one — it would lead the representative to recommend on a dimension
+the customer has never shown they understand.
+
 ### Running it without a browser
 
 The ledger has its own development loop — a scripted two-speaker transcript fed through the real
@@ -241,8 +253,8 @@ npm run drive -- --list                              # which sessions are live
 
 Against a deployment, set `BASE=https://your-app.vercel.app`. It finds the room by reading
 `sess:room:*` from Upstash, so it works the same either way. The injected lines do not appear in
-the transcript pane — that renders what the browser itself heard — but the alert, the strip and the
-record all update normally.
+the transcript pane — that renders what the browser itself heard — but the alert, the readiness panel
+and the record all update normally.
 
 Point the smoke test at a Vercel preview too. `next dev` and `next start` both keep the process alive forever,
 so neither proves `after()` survives a real serverless invocation. Budget it: one run spends about

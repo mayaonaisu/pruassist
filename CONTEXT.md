@@ -107,6 +107,27 @@ An alert presents evidence and suggests a question. It never blocks the rep, nev
 and never speaks to the customer. That is also the answer when someone asks what happens if the AI
 is wrong: the record states what was observed, never a verdict.
 
+## Decision
+
+A comparison the representative works through with a customer — which PRUShield tier, whether to
+add PRUExtra. Authored in [`src/lib/decisions.ts`](src/lib/decisions.ts) with the clauses that
+describe each option.
+
+Each decision splits its concepts in two. **Prerequisites** are what the comparison rests on: you
+cannot weigh two deductibles against each other without knowing what a deductible is.
+**Differentiators** are what changes which option is right. Only differentiators gate a
+recommendation — that is where the money differs.
+
+## Readiness
+
+What the ledger says about a decision, in [`src/lib/agent/readiness.ts`](src/lib/agent/readiness.ts).
+Per concept: its standing. Overall: what is blocking, what is open, whether the representative is
+ready, and the single question most worth asking next.
+
+`ready` means no misconception is outstanding and every differentiator has been **demonstrated** —
+not agreed to. It is a pure projection of the ledger, deliberately: whether a recommendation is
+safe to make is not a judgement to hand a model.
+
 ## Teach-back
 
 The question that would settle a concept, authored per concept — "if your bill came to S$8,000 at a
