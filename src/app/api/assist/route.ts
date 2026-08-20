@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { currentRep } from "@/lib/auth";
 import { retrieve } from "@/lib/retrieval";
+import { getByRoom } from "@/lib/sessions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 // Fast Gemini model for low-latency live suggestions.
 const MODEL = "gemini-2.5-flash";
 
+// This is the fast path and stays that way. Comprehension tracking lives behind /api/agent/state,
+// which schedules its own work after the response is flushed.
 export async function POST(req: NextRequest) {
   // Rep-only: this route spends billed Gemini calls.
   if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -18,13 +21,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ note: "Add GEMINI_API_KEY to .env.local to enable AI pointers." });
   }
 
-  const { transcript } = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => ({}));
+  const { transcript, roomId } = body ?? {};
   if (!transcript || typeof transcript !== "string") {
     return NextResponse.json({ error: "Missing 'transcript'." }, { status: 400 });
   }
 
+  // roomId is optional on purpose: a tab left open from an earlier session must not start
+  // failing mid-demo. Without it there is simply no ledger to update.
+  const session = typeof roomId === "string" && roomId ? await getByRoom(roomId) : null;
+  const productArea = session?.context.productArea;
+
   // 1) RETRIEVE the most relevant Prudential clauses for what was just said.
-  const hits = await retrieve(transcript, 3);
+  const hits = await retrieve(transcript, 3, productArea);
   if (!hits.length) {
     // No clause means no grounded citation, so say nothing rather than invent one.
     return NextResponse.json({ note: "No policy clause covers this yet — keep listening, or ask the customer to be more specific." });
@@ -40,9 +49,9 @@ export async function POST(req: NextRequest) {
       config: {
         systemInstruction:
           "You are PRUAssist, a PRIVATE co-pilot for a Prudential financial representative during a LIVE " +
-          "conversation about Health Protection (PRUShield) insurance. Use ONLY the POLICY CLAUSES provided — do not " +
-          "invent figures, product names or coverage. Produce concise private pointers for the representative. The " +
-          "customer never sees these. Respond ONLY with JSON of this shape:\n" +
+          `conversation about ${productArea ?? "Health Protection (PRUShield)"} insurance. Use ONLY the POLICY ` +
+          "CLAUSES provided — do not invent figures, product names or coverage. Produce concise private pointers " +
+          "for the representative. The customer never sees these. Respond ONLY with JSON of this shape:\n" +
           '{"concern": string,            // the customer concern/confusion you detect\n' +
           ' "firstStep": string,          // what the rep should do or check first\n' +
           ' "suggestedLine": string,      // one natural line the rep could say to open\n' +

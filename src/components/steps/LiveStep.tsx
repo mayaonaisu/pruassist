@@ -12,9 +12,12 @@ import { RoomEvent, Track } from "livekit-client";
 import "@livekit/components-styles";
 import { useBrowserSpeech } from "@/lib/useBrowserSpeech";
 import { useLocalMedia, type DeviceStatus } from "@/lib/useLocalMedia";
-import type { SessionInfo, Stats } from "@/lib/console-types";
+import type { SessionInfo, Stats, SummaryData } from "@/lib/console-types";
+import type { Alert, RecordRow } from "@/lib/agent/types";
 
-type Line = { id: string; speaker: string; text: string; flag?: boolean };
+// `at` is when the browser finalised the line. Every timing figure downstream is therefore an
+// approximation, and is labelled as one.
+type Line = { id: string; at: number; speaker: string; text: string; flag?: boolean };
 type Src = { source: string; snippet: string };
 type Pointers = {
   concern: string;
@@ -25,6 +28,14 @@ type Pointers = {
   followUp: string;
   sources: Src[];
 };
+
+// What the live console knows about comprehension, handed to the brief when the session ends.
+export type Comprehension = Pick<SummaryData, "record" | "customerName">;
+
+// The private comprehension state, polled from the deep pass.
+type AgentView = { rev: number; alert: Alert | null; record: RecordRow[]; degraded: boolean; unavailable?: boolean };
+
+const AGENT_POLL_MS = 5000;
 
 function looksLikeQuestion(text: string): boolean {
   const s = text.trim().toLowerCase();
@@ -40,7 +51,7 @@ export default function LiveStep({
 }: {
   repName: string;
   session: SessionInfo;
-  onEnd: (transcript: string, stats: Stats, durationMin: number) => void;
+  onEnd: (transcript: string, stats: Stats, durationMin: number, comprehension: Comprehension) => void;
 }) {
   const serverUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
   const [token, setToken] = useState<string>();
@@ -174,7 +185,7 @@ function LiveConsole({
 }: {
   repName: string;
   session: SessionInfo;
-  onEnd: (transcript: string, stats: Stats, durationMin: number) => void;
+  onEnd: (transcript: string, stats: Stats, durationMin: number, comprehension: Comprehension) => void;
 }) {
   const room = useRoomContext();
   const [lines, setLines] = useState<Line[]>([]);
@@ -188,6 +199,9 @@ function LiveConsole({
   const [auto, setAuto] = useState(true);
   const [copied, setCopied] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
+  const [agent, setAgent] = useState<AgentView>({ rev: 0, alert: null, record: [], degraded: false });
+  const [askedCopied, setAskedCopied] = useState(false);
+  const [ending, setEnding] = useState(false);
 
   const idRef = useRef(0);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -198,6 +212,8 @@ function LiveConsole({
   const startRef = useRef(0);
   const statsRef = useRef<Stats>({ surfaced: 0, used: 0, flags: 0, docs: 0 });
   const docsRef = useRef<Set<string>>(new Set());
+  const recordRef = useRef<RecordRow[]>([]);
+  const sentUpToRef = useRef(0);
 
   useEffect(() => {
     startRef.current = Date.now();
@@ -206,7 +222,8 @@ function LiveConsole({
 
   const addFinal = useCallback((speaker: string, text: string, flag = false) => {
     if (!text.trim()) return;
-    setLines((prev) => [...prev.slice(-200), { id: `${Date.now()}-${idRef.current++}`, speaker, text: text.trim(), flag }]);
+    const at = Date.now();
+    setLines((prev) => [...prev.slice(-200), { id: `${at}-${idRef.current++}`, at, speaker, text: text.trim(), flag }]);
     setInterim((prev) => ({ ...prev, [speaker]: "" }));
   }, []);
   const setSpeakerInterim = useCallback((speaker: string, text: string) => {
@@ -261,6 +278,59 @@ function LiveConsole({
     };
   }, [session.roomId]);
 
+  // The two-speed loop. One request per cycle carries the transcript window up and brings the
+  // ledger back down — the deep pass runs after the response is flushed, so the view the rep
+  // sees is always one cycle behind the scoring and never waits on it.
+  //
+  // The window, not just the new lines: re-ask and divergence both need what came before.
+  const syncAgent = useCallback(
+    async (act?: { type: "teach-back-asked" | "dismiss"; conceptId: string }, final = false) => {
+      const window = linesRef.current.slice(-60);
+      const newest = window.length ? window[window.length - 1].at : 0;
+      const fresh = final || newest > sentUpToRef.current;
+      try {
+        const res = await fetch("/api/agent/state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomId: session.roomId,
+            act,
+            final,
+            turns: fresh
+              ? window.map((l) => ({
+                  at: l.at,
+                  role: l.speaker === repName ? "rep" : "customer",
+                  speaker: l.speaker,
+                  text: l.text,
+                }))
+              : [],
+          }),
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as AgentView;
+        if (fresh) sentUpToRef.current = newest;
+        recordRef.current = data.record ?? [];
+        setAgent(data);
+      } catch {
+        /* a dropped poll is recovered by the next one */
+      }
+    },
+    [session.roomId, repName],
+  );
+
+  useEffect(() => {
+    let active = true;
+    const tick = () => {
+      if (active) syncAgent();
+    };
+    tick();
+    const t = setInterval(tick, AGENT_POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, [syncAgent]);
+
   useEffect(() => {
     linesRef.current = lines;
   }, [lines]);
@@ -283,7 +353,9 @@ function LiveConsole({
       const res = await fetch("/api/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript }),
+        // roomId lets the route scope retrieval to the session's product area — the context the
+        // rep set at consent and which never reached the AI before.
+        body: JSON.stringify({ transcript, roomId: session.roomId }),
       });
       const data = await res.json();
       if (data.note) {
@@ -314,7 +386,7 @@ function LiveConsole({
       inFlightRef.current = false;
       setLoading(false);
     }
-  }, []);
+  }, [session.roomId]);
 
   useEffect(() => {
     if (!auto) return;
@@ -336,10 +408,46 @@ function LiveConsole({
     statsRef.current.used += 1;
   };
 
-  const end = () => {
+  // Acting on an alert is a rep action, not a ledger write: it goes to its own key and the next
+  // deep pass folds it in. The alert clears optimistically so the console does not nag.
+  const actOnAlert = (type: "teach-back-asked" | "dismiss") => {
+    const conceptId = agent.alert?.conceptId;
+    if (!conceptId) return;
+    setAgent((a) => ({ ...a, alert: null }));
+    syncAgent({ type, conceptId });
+  };
+
+  const copyTeachBack = () => {
+    if (!agent.alert) return;
+    navigator.clipboard?.writeText(agent.alert.teachBack).catch(() => {});
+    setAskedCopied(true);
+    setTimeout(() => setAskedCopied(false), 1500);
+  };
+
+  // The record is the deliverable, so ending flushes the last exchange through the deep pass and
+  // reads it back before leaving. The pass runs after the POST responds, hence the short wait —
+  // the alternative is a brief that silently omits the final minute of the conversation.
+  const end = async () => {
+    if (ending) return;
+    setEnding(true);
+    let record = recordRef.current;
+    try {
+      await syncAgent(undefined, true);
+      await new Promise((r) => setTimeout(r, 1600));
+      const res = await fetch(`/api/agent/state?roomId=${encodeURIComponent(session.roomId)}`);
+      if (res.ok) {
+        const data = (await res.json()) as AgentView;
+        if (Array.isArray(data.record) && data.record.length) record = data.record;
+      }
+    } catch {
+      /* fall back to the last polled record rather than blocking the rep */
+    }
     const transcript = linesRef.current.map((l) => `${l.speaker}: ${l.text}`).join("\n");
     const dur = Math.max(1, Math.round((Date.now() - startRef.current) / 60000));
-    onEnd(transcript, { ...statsRef.current, docs: docsRef.current.size }, dur);
+    onEnd(transcript, { ...statsRef.current, docs: docsRef.current.size }, dur, {
+      record,
+      customerName: consent?.name ?? "",
+    });
   };
 
   const joinUrl = typeof window !== "undefined" ? window.location.origin + session.joinPath : session.joinPath;
@@ -349,17 +457,25 @@ function LiveConsole({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // Derived from flags already on the transcript, never a signal the transcript lacks.
-  const { bars, flagCount } = useMemo(() => {
+  // Ledger transitions, plotted where in the session they happened. This used to plot regex hits
+  // on the transcript, which looked like comprehension data without being any.
+  const { bars, openCount } = useMemo(() => {
     const out = new Array(BUCKETS).fill(0) as number[];
-    let flags = 0;
-    lines.forEach((l, i) => {
-      if (!l.flag) return;
-      flags += 1;
-      out[Math.min(BUCKETS - 1, Math.floor((i / Math.max(1, lines.length)) * BUCKETS))] += 1;
-    });
-    return { bars: out, flagCount: flags };
-  }, [lines]);
+    const timed = agent.record.filter((r) => r.at && r.state !== "unseen");
+    // Spanned by the evidence itself rather than by the clock, so the memo stays pure and the
+    // bars do not creep leftward every second the rep sits idle.
+    const last = timed.reduce((m, r) => Math.max(m, r.at ?? 0), startedAt);
+    const span = Math.max(1, last - startedAt);
+    let open = 0;
+    for (const row of timed) {
+      if (row.risk) open += 1;
+      const weight = row.state === "misunderstood" ? 2 : row.state === "asserted" ? 1 : 0;
+      if (!weight) continue;
+      const slot = Math.floor(((row.at! - startedAt) / span) * (BUCKETS - 1));
+      out[Math.min(BUCKETS - 1, Math.max(0, slot))] += weight;
+    }
+    return { bars: out, openCount: open };
+  }, [agent.record, startedAt]);
 
   // While the rep is muted, drop their half-captured phrase so no stale "live" text lingers.
   const visibleInterim = micEnabled ? interim : { ...interim, [repName]: "" };
@@ -411,8 +527,8 @@ function LiveConsole({
           >
             {auto ? "Auto-suggest on" : "Auto-suggest off"}
           </button>
-          <button className="btn-end" onClick={end}>
-            End session
+          <button className="btn-end" onClick={end} disabled={ending}>
+            {ending ? "Closing the record…" : "End session"}
           </button>
         </span>
       </div>
@@ -427,6 +543,8 @@ function LiveConsole({
         <Faces media={media} />
         <div className="c-meta">
           <div className="strip-h">Where they lost the thread</div>
+          {/* Real ledger transitions: taller and darker where a concept was only agreed to, or
+              where the customer said something the clauses contradict. */}
           <div className="bars">
             {bars.map((n, i) => (
               <span
@@ -440,13 +558,60 @@ function LiveConsole({
             <span>00:00</span>
             <span>
               <b>
-                {flagCount} {flagCount === 1 ? "flag" : "flags"}
+                {openCount} {openCount === 1 ? "open" : "open"}
               </b>
             </span>
             <span>now</span>
           </div>
         </div>
       </div>
+
+      {/* COMPREHENSION — evidence about the customer, never a verdict, and never blocking.
+          It sits above the line because it changes what the rep should say next. */}
+      {agent.alert && (
+        <div className={`comp comp-${agent.alert.kind} pru-enter`} role="status">
+          <div className="comp-h">
+            <span className="cat">{ALERT_CAT[agent.alert.kind]}</span>
+            <span className="conf">{agent.alert.label}</span>
+          </div>
+          <div className="comp-head">{agent.alert.headline}</div>
+          <div className="comp-detail">
+            {agent.alert.quote && <span className="comp-quote">“{agent.alert.quote}”</span>}
+            {agent.alert.detail}
+          </div>
+          <div className="say-wrap">
+            <div className="say">
+              <span className="q">“</span>
+              {agent.alert.teachBack}
+              <span className="q">”</span>
+            </div>
+            <div className="cite">
+              <b>Grounded in</b>
+              {agent.alert.citations.map((s, i) => (
+                <span key={i}>{s}</span>
+              ))}
+            </div>
+          </div>
+          <div className="say-actions">
+            <button className="said" onClick={() => actOnAlert("teach-back-asked")}>
+              Asked it
+            </button>
+            <button className="ghost" onClick={copyTeachBack}>
+              {askedCopied ? "✓ Copied" : "Copy question"}
+            </button>
+            <button className="ghost" onClick={() => actOnAlert("dismiss")}>
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
+
+      {agent.unavailable && (
+        <div className="notice bad" style={{ flex: "none" }}>
+          Comprehension tracking is unavailable — the shared session store isn’t reachable, so
+          nothing is being recorded. Pointers and the call are unaffected.
+        </div>
+      )}
 
       {/* THE LINE — the one thing the rep reads mid-conversation. */}
       <div className="line-block">
@@ -559,6 +724,14 @@ function LiveConsole({
     </div>
   );
 }
+
+// The eyebrow above each alert. Named for what was observed, not for a judgement about the person.
+const ALERT_CAT: Record<Alert["kind"], string> = {
+  "false-assent": "Agreed, not demonstrated",
+  misunderstood: "Contradicts the policy",
+  divergence: "Qualifier dropped",
+  "re-ask": "Asked again",
+};
 
 const MIC_LABEL: Record<DeviceStatus, { text: string; hint: string }> = {
   on: { text: "Mic", hint: "Mute microphone" },

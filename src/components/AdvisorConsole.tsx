@@ -4,11 +4,13 @@ import { useCallback, useState } from "react";
 import Chrome from "./Chrome";
 import IntroStep from "./steps/IntroStep";
 import ConsentStep from "./steps/ConsentStep";
-import LiveStep from "./steps/LiveStep";
+import LiveStep, { type Comprehension } from "./steps/LiveStep";
 import SummaryStep from "./steps/SummaryStep";
 import type { SessionInfo, Stats, SummaryData } from "@/lib/console-types";
 
-function toSummary(raw: unknown): Omit<SummaryData, "stats" | "durationMin"> {
+type Narrative = Pick<SummaryData, "concerns" | "talkingPoints" | "followUps" | "notes">;
+
+function toSummary(raw: unknown): Narrative {
   const o = (raw ?? {}) as Record<string, unknown>;
   const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
   return {
@@ -30,7 +32,7 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
   }, []);
 
   const onEnded = useCallback(
-    async (transcriptText: string, stats: Stats, durationMin: number) => {
+    async (transcriptText: string, stats: Stats, durationMin: number, comprehension: Comprehension) => {
       if (session) {
         fetch("/api/session/end", {
           method: "POST",
@@ -38,12 +40,7 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
           body: JSON.stringify({ roomId: session.roomId }),
         }).catch(() => {});
       }
-      let data: Omit<SummaryData, "stats" | "durationMin"> = {
-        concerns: [],
-        talkingPoints: [],
-        followUps: [],
-        notes: "",
-      };
+      let data: Narrative = { concerns: [], talkingPoints: [], followUps: [], notes: "" };
       try {
         const res = await fetch("/api/summary", {
           method: "POST",
@@ -55,10 +52,12 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
       } catch {
         /* keep empty summary */
       }
-      setSummary({ ...data, stats, durationMin });
+      // The record is the rep's own signed artifact, so it is signed with the consent signature
+      // they typed at the start of this session — not with a name the server assumed.
+      setSummary({ ...data, ...comprehension, stats, durationMin, signedBy: repName });
       setStep(3);
     },
-    [session],
+    [session, repName],
   );
 
   const reset = useCallback(() => {

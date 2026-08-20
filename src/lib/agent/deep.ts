@@ -10,7 +10,9 @@ import type { AgentState, Turn } from "./types";
 // conversation would otherwise fan out one pass per utterance.
 const MIN_INTERVAL_MS = 5_000;
 
-export type DeepInput = { roomId: string; productArea: string; turns: Turn[] };
+// `force` is for the flush when the rep ends the session: the record is the deliverable, so the
+// last exchange must be scored even if a pass ran a second ago.
+export type DeepInput = { roomId: string; productArea: string; turns: Turn[]; force?: boolean };
 
 export type DeepOutcome =
   | { ran: false; reason: "disabled" | "debounced" | "no-concepts" | "no-new-turns" | "write-lost" }
@@ -20,14 +22,14 @@ export function deepEnabled(): boolean {
   return process.env.PRUASSIST_DEEP !== "0";
 }
 
-export async function deepPass({ roomId, productArea, turns }: DeepInput): Promise<DeepOutcome> {
+export async function deepPass({ roomId, productArea, turns, force }: DeepInput): Promise<DeepOutcome> {
   if (!deepEnabled()) return { ran: false, reason: "disabled" };
 
   const pool = conceptsForArea(productArea);
   if (!pool.length) return { ran: false, reason: "no-concepts" };
 
   const loaded = await loadState(roomId, productArea);
-  if (loaded.updatedAt && Date.now() - loaded.updatedAt < MIN_INTERVAL_MS) {
+  if (!force && loaded.updatedAt && Date.now() - loaded.updatedAt < MIN_INTERVAL_MS) {
     return { ran: false, reason: "debounced" };
   }
 

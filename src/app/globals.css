@@ -716,6 +716,74 @@ button {
   cursor: not-allowed;
 }
 
+/* COMPREHENSION — evidence about the customer, sitting above the line because it changes what
+   the rep should say next. The highlighter is the house signal for confusion, so it carries the
+   softer states; only a direct contradiction of a clause escalates to the brand rule. */
+.comp {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--marker);
+  border-radius: var(--r-md);
+  padding: clamp(11px, 1.3vh, 17px) clamp(15px, 1.5vw, 23px);
+  flex: none;
+}
+.comp-misunderstood,
+.comp-divergence {
+  border-left-color: var(--pru);
+  background: var(--pru-tint);
+}
+.comp-h {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 6px;
+}
+.comp-h .cat {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--marker-ink);
+  background: var(--marker-wash);
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+}
+.comp-misunderstood .cat,
+.comp-divergence .cat {
+  color: var(--pru);
+  background: var(--pru-tint);
+  box-shadow: inset 0 0 0 1px var(--pru-line);
+}
+.comp-h .conf {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--pencil);
+}
+.comp-head {
+  font-size: clamp(15px, 1.15vw, 18px);
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+.comp-detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin-bottom: 9px;
+}
+/* The customer's own words are the evidence, so they are set in the spoken face. */
+.comp-quote {
+  font-family: var(--font-spoken);
+  font-size: 13.5px;
+  color: var(--ink-2);
+  margin-right: 7px;
+}
+.comp .say {
+  font-size: clamp(17px, 1.3vw, 23px);
+}
+
 /* supporting material + transcript, side by side under the line */
 .c-bot {
   display: grid;
@@ -1136,6 +1204,109 @@ button {
   font-size: 13px;
   line-height: 1.6;
   color: var(--ink-3);
+}
+
+/* ---- the Understanding Record: the artifact the rep signs and files ---- */
+.ur {
+  border-top: 1px solid var(--rule);
+}
+.ur-row {
+  display: grid;
+  grid-template-columns: 150px 108px 42px minmax(0, 1fr) 118px;
+  grid-template-areas: "label state at quote cite" ". risk risk risk risk";
+  gap: 2px 12px;
+  align-items: baseline;
+  padding: 9px 0 9px 10px;
+  border-bottom: 1px solid var(--rule-soft);
+  border-left: 2px solid transparent;
+}
+.ur-demonstrated {
+  border-left-color: var(--stamp);
+}
+.ur-asserted {
+  border-left-color: var(--marker);
+}
+.ur-misunderstood {
+  border-left-color: var(--pru);
+}
+.ur-label {
+  grid-area: label;
+  font-size: 13px;
+  color: var(--ink);
+}
+.ur-state {
+  grid-area: state;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--pencil);
+}
+.ur-demonstrated .ur-state {
+  color: var(--stamp);
+}
+.ur-asserted .ur-state {
+  color: var(--marker-ink);
+}
+.ur-misunderstood .ur-state {
+  color: var(--pru);
+}
+.ur-at {
+  grid-area: at;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--pencil);
+}
+/* Their words, in the spoken face — the evidence, not a paraphrase of it. */
+.ur-quote {
+  grid-area: quote;
+  font-family: var(--font-spoken);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.ur-cite {
+  grid-area: cite;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--pencil);
+  text-align: right;
+}
+.ur-risk:not(:empty) {
+  grid-area: risk;
+  font-size: 11.5px;
+  color: var(--marker-ink);
+  padding-top: 2px;
+}
+.ur-misunderstood .ur-risk {
+  color: var(--pru);
+}
+.ur-sign {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.ur-sign b {
+  font-weight: 400;
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .ur-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "label state" "quote quote" "cite at" "risk risk";
+  }
+  .ur-cite {
+    text-align: left;
+  }
 }
 
 /* ============ customer join ============ */

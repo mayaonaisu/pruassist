@@ -145,6 +145,13 @@ export default function CustomerPage() {
                 <span>The conversation is transcribed so they can quote the policy accurately.</span>
               </li>
               <li>
+                <IconCheck size={15} />
+                <span>
+                  Short quotes of what you say about specific policy terms are kept for 24 hours, so
+                  {" " + info.repName} has a record of what was explained and what is still unclear.
+                </span>
+              </li>
+              <li>
                 <IconX size={15} />
                 <span>A private assistant helps them find the right wording — it never speaks to you, and never makes the recommendation.</span>
               </li>

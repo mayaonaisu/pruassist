@@ -127,7 +127,9 @@ export default function ConsentStep({
             <span className={`chip ${ready ? "ok" : "wait"}`}>{ready ? "SIGNED" : "UNSIGNED"}</span>
           </div>
           <p>
-            I confirm the customer has been told this session is recorded and transcribed to assist my advice.
+            I confirm the customer has been told this session is recorded and transcribed to assist my advice, and
+            that short quotes of what they say about specific policy terms are kept for 24 hours to produce the
+            understanding record.
           </p>
           <label style={{ display: "flex", gap: 8, fontSize: 13, cursor: "pointer", marginBottom: 16, color: "var(--ink-2)" }}>
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />

@@ -2,6 +2,24 @@
 
 import { useState } from "react";
 import type { SummaryData } from "@/lib/console-types";
+import type { ConceptState, RecordRow } from "@/lib/agent/types";
+
+// What each state means on the record. The wording is deliberately about what was observed, never
+// about the customer: "agreed, never demonstrated" is a fact; "did not understand" is a verdict.
+const STATE_LABEL: Record<ConceptState, string> = {
+  unseen: "NEVER RAISED",
+  raised: "EXPLAINED",
+  asserted: "ASSERTED ONLY",
+  demonstrated: "DEMONSTRATED",
+  misunderstood: "MISUNDERSTOOD",
+};
+
+const hhmm = (at?: number) =>
+  at ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+
+// The page citations, without the document name repeated on every row.
+const pages = (citations: string[]) =>
+  [...new Set(citations.flatMap((c) => c.split(" · ").slice(1)))].join(", ");
 
 export default function SummaryStep({
   summary,
@@ -24,10 +42,32 @@ export default function SummaryStep({
   const exportBrief = () => {
     const block = (title: string, items: string[]) =>
       [title, ...(items.length ? items.map((i) => `  - ${i}`) : ["  - (none captured)"]), ""].join("\n");
+    const recordBlock = summary.record.length
+      ? [
+          "Understanding Record — what the customer demonstrated, in their own words:",
+          ...summary.record.map((r) =>
+            [
+              `  ${r.label.padEnd(22)} ${STATE_LABEL[r.state].padEnd(15)}`,
+              hhmm(r.at).padEnd(6),
+              r.quote ? `"${r.quote}"` : "",
+              `[${pages(r.citations)}]`,
+              r.risk ? `-- ${r.risk}` : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
+          ),
+          "",
+          `Signed: ${summary.signedBy}${summary.customerName ? ` · Customer: ${summary.customerName}` : ""}`,
+          "This record states what was observed in the conversation. It is not an assessment of the",
+          "customer's understanding, and PRUAssist made no recommendation.",
+          "",
+        ].join("\n")
+      : "";
     const text = [
       "PRUAssist — Advisor Session Brief",
       `${productArea} · ${summary.durationMin} min`,
       "",
+      recordBlock,
       block("Key customer concerns:", summary.concerns),
       block("Talking points:", summary.talkingPoints),
       block("Follow-up items:", summary.followUps),
@@ -73,6 +113,8 @@ export default function SummaryStep({
         {s.docs === 1 ? "document" : "documents"}.
       </p>
 
+      <UnderstandingRecord rows={summary.record} signedBy={summary.signedBy} customerName={summary.customerName} />
+
       <Section title="What the customer raised" items={summary.concerns} />
       <Section title="Lines suggested to you" items={summary.talkingPoints} said />
       <Section title="Still open" items={summary.followUps} />
@@ -110,6 +152,70 @@ export default function SummaryStep({
           Start new session
         </button>
         <span className="hint">The transcript is discarded when you leave this page</span>
+      </div>
+    </div>
+  );
+}
+
+/* The artifact. Per concept: the state, the customer's own timestamped words as evidence, the
+   brochure pages, and what is still open. This is the part that decides a mis-selling dispute two
+   years from now, so it quotes rather than concludes. */
+function UnderstandingRecord({
+  rows,
+  signedBy,
+  customerName,
+}: {
+  rows: RecordRow[];
+  signedBy: string;
+  customerName: string;
+}) {
+  if (!rows.length) {
+    return (
+      <div className="sec">
+        <div className="sec-h">Understanding record</div>
+        <p className="pru-muted" style={{ fontSize: 13 }}>
+          No comprehension evidence was captured for this session. This happens when the shared
+          session store was unreachable, or when the conversation covered no tracked concept.
+        </p>
+      </div>
+    );
+  }
+
+  const open = rows.filter((r) => r.risk).length;
+
+  return (
+    <div className="sec">
+      <div className="sec-h">Understanding record</div>
+      <p className="pru-muted" style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 12 }}>
+        What the customer <b>showed</b>, not what they agreed to. Quotes are their own words, timed
+        from the transcript. {open ? `${open} ${open === 1 ? "item is" : "items are"} still open.` : "Nothing is left open."}
+      </p>
+
+      <div className="ur">
+        {rows.map((r) => (
+          <div key={r.conceptId} className={`ur-row ur-${r.state}`}>
+            <div className="ur-label">{r.label}</div>
+            <div className="ur-state">{STATE_LABEL[r.state]}</div>
+            <div className="ur-at">{hhmm(r.at)}</div>
+            <div className="ur-quote">{r.quote ? `“${r.quote}”` : <span className="pru-muted">—</span>}</div>
+            <div className="ur-cite">{pages(r.citations)}</div>
+            <div className="ur-risk">{r.risk ? `⚠ ${r.risk}` : ""}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="ur-sign">
+        <span>
+          Signed <b>{signedBy}</b>
+          {customerName ? (
+            <>
+              {" · "}Customer <b>{customerName}</b>
+            </>
+          ) : null}
+        </span>
+        <span className="pru-muted">
+          States what was observed in the conversation, not an assessment of the customer.
+        </span>
       </div>
     </div>
   );

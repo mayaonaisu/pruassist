@@ -1,3 +1,5 @@
+import type { RecordRow } from "./agent/types";
+
 export type SessionInfo = {
   joinToken: string;
   roomId: string;
@@ -15,4 +17,9 @@ export type SummaryData = {
   notes: string;
   stats: Stats;
   durationMin: number;
+  // The Understanding Record: one row per material concept, with the customer's own words as
+  // evidence. Empty when the shared store was unavailable during the session.
+  record: RecordRow[];
+  customerName: string;
+  signedBy: string;
 };
