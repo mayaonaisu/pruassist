@@ -1,6 +1,7 @@
 import { Type } from "@google/genai";
 import { clausesFor, conceptById, type Concept } from "../concepts";
-import { callWithRetry, getAi, MODEL, thinking } from "./gemini";
+import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "./gemini";
+import { haveKey } from "../genai";
 import { clauseBlock, HOUSE_RULES } from "./prompts";
 import { normaliseQuote } from "./utterance";
 import type { AgentState, Detection, Turn } from "./types";
@@ -32,11 +33,10 @@ const SCHEMA = {
  * detectors rather than inventing a verdict.
  */
 export async function gradeExplainBack(concept: Concept, answer: string): Promise<ExplainBack | null> {
-  const ai = getAi();
-  if (!ai || answer.trim().split(/\s+/).length < 3) return null;
+  if (!haveKey() || answer.trim().split(/\s+/).length < 3) return null;
 
   const clauses = clausesFor(concept);
-  const res = await callWithRetry("judge", () =>
+  const res = await callWithRetry("judge", (ai) =>
     ai.models.generateContent({
       model: MODEL,
       contents:
@@ -49,7 +49,11 @@ export async function gradeExplainBack(concept: Concept, answer: string): Promis
         systemInstruction:
           "Grade the customer's answer against what the policy says. " +
           HOUSE_RULES +
-          " `correct` means they captured the substance, even loosely and without the jargon. " +
+          " Grade ONE idea: the one in WHAT THE POLICY ACTUALLY SAYS. Never mark an answer down " +
+          "for leaving out something true but belonging to a different part of the policy — the " +
+          "representative asked about one thing, and an alert about a second thing would read as " +
+          "the customer having failed when they did not. " +
+          "`correct` means they captured the substance, even loosely and without the jargon. " +
           "`partial` means part of it is right and a material part is missing. `wrong` means they " +
           "stated something the clauses contradict. Be generous about wording and strict about " +
           "substance: a customer explaining it in their own words is the point. " +
@@ -60,15 +64,25 @@ export async function gradeExplainBack(concept: Concept, answer: string): Promis
         responseSchema: SCHEMA,
         thinkingConfig: thinking("off"),
         temperature: 0,
-        maxOutputTokens: 300,
+        maxOutputTokens: JSON_BUDGET,
       },
     }),
   );
   if (!res) return null;
 
+  const text = (res.text ?? "").trim();
+  if (!text) {
+    // Almost always the token cap: thinking counts against it, so a tight budget returns nothing.
+    console.error("[judge] empty response — raise JSON_BUDGET if this recurs");
+    return null;
+  }
+
   try {
-    const p = JSON.parse((res.text ?? "{}").trim()) as Partial<ExplainBack>;
-    if (p.verdict !== "correct" && p.verdict !== "partial" && p.verdict !== "wrong") return null;
+    const p = JSON.parse(text) as Partial<ExplainBack>;
+    if (p.verdict !== "correct" && p.verdict !== "partial" && p.verdict !== "wrong") {
+      console.error(`[judge] no usable verdict in: ${text.slice(0, 120)}`);
+      return null;
+    }
     return {
       verdict: p.verdict,
       missing: typeof p.missing === "string" ? p.missing : "",
@@ -76,6 +90,7 @@ export async function gradeExplainBack(concept: Concept, answer: string): Promis
     };
   } catch {
     // An unparseable grade is no grade. The deterministic detectors still ran on this turn.
+    console.error(`[judge] unparseable grade: ${text.slice(0, 120)}`);
     return null;
   }
 }

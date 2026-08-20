@@ -1,33 +1,34 @@
-import { GoogleGenAI } from "@google/genai";
 import { KNOWLEDGE, areaOfClause, type Clause } from "./knowledge";
+import { cooldownFor, getAi, keyCount, rotateAfterRateLimit, statusOf } from "./genai";
 
 // Embedding failures are logged, never swallowed: silent fallback once faked semantic grounding.
 const EMBED_MODEL = "gemini-embedding-001";
 
 export type Hit = Clause & { score: number };
 
-let client: GoogleGenAI | null = null;
-function getClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!client) client = new GoogleGenAI({ apiKey });
-  return client;
-}
-
 // Asymmetric retrieval: corpus and query need different task types, or ranking degrades.
 // SEMANTIC_SIMILARITY is the symmetric case — comparing two utterances, not a query to a corpus.
 type TaskType = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY" | "SEMANTIC_SIMILARITY";
 
 async function embedBatch(texts: string[], taskType: TaskType): Promise<(number[] | null)[]> {
-  const ai = getClient();
-  if (!ai) return texts.map(() => null);
-  try {
-    const res = await ai.models.embedContent({ model: EMBED_MODEL, contents: texts, config: { taskType } });
-    return texts.map((_, i) => res.embeddings?.[i]?.values ?? null);
-  } catch (e) {
-    console.error(`[retrieval] ${taskType} embedding failed (model ${EMBED_MODEL}):`, e);
-    return texts.map(() => null);
+  const nothing = () => texts.map(() => null);
+  // Embeddings have their own quota, but it is still per key — so a rate limit rotates rather than
+  // dropping the whole corpus to keyword matching. No sleeping here: retrieval sits on the live
+  // path, and the lexical fallback is a better answer than a waiting rep.
+  for (let attempt = 0; attempt <= keyCount(); attempt++) {
+    const ai = getAi();
+    if (!ai) return nothing();
+    try {
+      const res = await ai.models.embedContent({ model: EMBED_MODEL, contents: texts, config: { taskType } });
+      return texts.map((_, i) => res.embeddings?.[i]?.values ?? null);
+    } catch (e) {
+      if (statusOf(e) === 429 && rotateAfterRateLimit(cooldownFor(e))) continue;
+      console.error(`[retrieval] ${taskType} embedding failed (model ${EMBED_MODEL}):`, e);
+      return nothing();
+    }
   }
+  console.error(`[retrieval] every key is rate limited; falling back to keyword matching`);
+  return nothing();
 }
 
 async function embedQuery(text: string): Promise<number[] | null> {

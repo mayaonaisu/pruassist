@@ -34,7 +34,8 @@ delete process.env.UPSTASH_REDIS_REST_URL;
 delete process.env.UPSTASH_REDIS_REST_TOKEN;
 delete process.env.KV_REST_API_URL;
 delete process.env.KV_REST_API_TOKEN;
-if (noAi) delete process.env.GEMINI_API_KEY;
+// Every key, not just the first: one left set would keep the vector path alive.
+if (noAi) for (const k of Object.keys(process.env)) if (/^GEMINI_API_KEY(_\d+)?$/.test(k)) delete process.env[k];
 
 const { conceptsForArea } = await import("../src/lib/concepts.ts");
 const { applyActs, buildRecord, sameAlert } = await import("../src/lib/agent/ledger.ts");

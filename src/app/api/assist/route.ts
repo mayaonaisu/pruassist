@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { currentRep } from "@/lib/auth";
 import { retrieve } from "@/lib/retrieval";
 import { getByRoom } from "@/lib/sessions";
-import { getAi, MODEL, thinking } from "@/lib/agent/gemini";
+import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "@/lib/agent/gemini";
+import { haveKey } from "@/lib/genai";
 import { loadState } from "@/lib/agent/ledger";
 import { matchesLookahead } from "@/lib/agent/cache";
 import { clauseBlock, pointerSystemInstruction } from "@/lib/agent/prompts";
@@ -18,8 +19,7 @@ export async function POST(req: NextRequest) {
   // Rep-only: this route spends billed Gemini calls.
   if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
-  const ai = getAi();
-  if (!ai) {
+  if (!haveKey()) {
     return NextResponse.json({ note: "Add GEMINI_API_KEY to .env.local to enable AI pointers." });
   }
 
@@ -62,49 +62,54 @@ export async function POST(req: NextRequest) {
   }
 
   // 2) GENERATE a structured set of private pointers, grounded in those clauses.
-  try {
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: `POLICY CLAUSES:\n${clauseBlock(hits)}\n\nRECENT TRANSCRIPT:\n${transcript}`,
-      config: {
-        systemInstruction: pointerSystemInstruction(productArea),
-        responseMimeType: "application/json",
-        thinkingConfig: thinking("off"),
-        temperature: 0.3,
-        maxOutputTokens: 800,
-      },
-    });
+  // allowSleep is off: a rate limit rotates to another key if one is free, but the rep is waiting,
+  // so it never blocks on a cooldown — it degrades to a note instead.
+  const response = await callWithRetry(
+    "assist",
+    (ai) =>
+      ai.models.generateContent({
+        model: MODEL,
+        contents: `POLICY CLAUSES:\n${clauseBlock(hits)}\n\nRECENT TRANSCRIPT:\n${transcript}`,
+        config: {
+          systemInstruction: pointerSystemInstruction(productArea),
+          responseMimeType: "application/json",
+          thinkingConfig: thinking("off"),
+          temperature: 0.3,
+          maxOutputTokens: JSON_BUDGET,
+        },
+      }),
+    { allowSleep: false },
+  );
 
-    const text = (response.text ?? "").trim();
-    let p: Record<string, unknown> = {};
-    try {
-      p = JSON.parse(text);
-    } catch {
-      p = { explainer: text };
-    }
-    const str = (v: unknown) => (typeof v === "string" ? v : "");
-    const pointers = {
-      concern: str(p.concern),
-      firstStep: str(p.firstStep),
-      suggestedLine: str(p.suggestedLine),
-      explainer: str(p.explainer),
-      comparison: str(p.comparison),
-      followUp: str(p.followUp),
-    };
-
-    // 3) VERIFY, deterministically. There is no time for a second model call here, so the check
-    // targets the failure that matters most: a figure the model invented, shown next to a real
-    // brochure page number. It labels rather than blocks — the rep decides what to say.
-    const spoken = [pointers.suggestedLine, pointers.explainer, pointers.comparison].filter(Boolean).join("\n");
-
-    return NextResponse.json({
-      ...pointers,
-      sources: hits.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) })),
-      cached: false,
-      unsupportedFigures: unsupportedFigures(spoken, hits),
-    });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "AI request failed.";
-    return NextResponse.json({ note: `AI error: ${message}` });
+  if (!response) {
+    return NextResponse.json({ note: "The AI service is rate limited right now — try again in a moment." });
   }
+
+  let p: Record<string, unknown> = {};
+  try {
+    p = JSON.parse((response.text ?? "").trim());
+  } catch {
+    p = { explainer: (response.text ?? "").trim() };
+  }
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const pointers = {
+    concern: str(p.concern),
+    firstStep: str(p.firstStep),
+    suggestedLine: str(p.suggestedLine),
+    explainer: str(p.explainer),
+    comparison: str(p.comparison),
+    followUp: str(p.followUp),
+  };
+
+  // 3) VERIFY, deterministically. There is no time for a second model call here, so the check
+  // targets the failure that matters most: a figure the model invented, shown next to a real
+  // brochure page number. It labels rather than blocks — the rep decides what to say.
+  const spoken = [pointers.suggestedLine, pointers.explainer, pointers.comparison].filter(Boolean).join("\n");
+
+  return NextResponse.json({
+    ...pointers,
+    sources: hits.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) })),
+    cached: false,
+    unsupportedFigures: unsupportedFigures(spoken, hits),
+  });
 }

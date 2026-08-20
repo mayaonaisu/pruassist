@@ -7,11 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "replay": "tsx scripts/replay.mts",
-    "replay:all": "tsx scripts/replay.mts fixtures/false-assent.json fixtures/panel-misconception.json fixtures/re-ask.json fixtures/explain-back.json fixtures/teach-back-correct.json fixtures/teach-back-partial.json fixtures/off-topic.json",
-    "check": "tsx --test scripts/checks.mts",
-    "e2e": "node --env-file=.env.local scripts/e2e.mjs",
-    "drive": "node --env-file=.env.local scripts/drive.mjs"
+    "replay": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/replay.mts",
+    "replay:all": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/replay.mts fixtures/false-assent.json fixtures/panel-misconception.json fixtures/re-ask.json fixtures/explain-back.json fixtures/teach-back-correct.json fixtures/teach-back-partial.json fixtures/off-topic.json",
+    "check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs --test scripts/checks.mts",
+    "e2e": "node --env-file-if-exists=.env.local scripts/e2e.mjs",
+    "drive": "node --env-file-if-exists=.env.local scripts/drive.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",

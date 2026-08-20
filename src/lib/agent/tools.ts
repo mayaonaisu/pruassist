@@ -2,7 +2,8 @@ import { Type, type Content, type FunctionDeclaration, type Part } from "@google
 import { conceptsForArea } from "../concepts";
 import { clauseById } from "../knowledge";
 import { retrieve, type Hit } from "../retrieval";
-import { callWithRetry, getAi, MAX_TOOL_STEPS, MODEL, thinking } from "./gemini";
+import { callWithRetry, JSON_BUDGET, MAX_TOOL_STEPS, MODEL, thinking } from "./gemini";
+import { haveKey } from "../genai";
 import type { AgentState } from "./types";
 
 // The tool loop, written by hand on purpose.
@@ -113,14 +114,13 @@ export async function runToolLoop(
   task: string,
   ctx: ToolContext,
 ): Promise<{ text: string; run: ToolRun } | null> {
-  const ai = getAi();
-  if (!ai) return null;
+  if (!haveKey()) return null;
 
   const contents: Content[] = [{ role: "user", parts: [{ text: task }] }];
   const run: ToolRun = { cited: [], steps: 0, transcript: [] };
 
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
-    const res = await callWithRetry("tools", () =>
+    const res = await callWithRetry("tools", (ai) =>
       ai.models.generateContent({
         model: MODEL,
         contents,
@@ -131,7 +131,7 @@ export async function runToolLoop(
           // selection, and choosing what to search for is the whole job of this phase.
           thinkingConfig: thinking("dynamic"),
           temperature: 0.2,
-          maxOutputTokens: 1400,
+          maxOutputTokens: JSON_BUDGET * 2,
         },
       }),
     );

@@ -163,14 +163,24 @@ it", "Not now") are appended to their own key so they can never race it. Set `PR
 turn the whole thing off without a deploy, or `PRUASSIST_LOOKAHEAD=0` to keep comprehension tracking
 and drop only the expensive stage.
 
-**What it costs, and the ceiling on it.** Free-tier Gemini quota is per project *per model per day*
-— 20 `generateContent` requests/day on `gemini-2.5-flash` at the time of writing, and a single
-lookahead can spend a third of that. So the background work is bounded rather than trusted: at most
-3 tool steps per lookahead, one lookahead per room per 25 seconds, and a hard ceiling of 60
-background model calls for a whole session. When that ceiling is reached the deterministic detectors
-carry on, because they cost nothing. `PRUASSIST_MODEL` swaps the model without a code change, and
-the thinking configuration adapts to the family — the 2.5 series takes `thinkingBudget` and rejects
-`thinkingLevel`, the 3.x series is the other way round and returns a bare 400 for the wrong one.
+**What it costs, and the three ceilings on it.** Free-tier Gemini quota is per project *per model
+per day* — 20 `generateContent` requests a day and 10 a minute, and a single lookahead can spend a
+third of the daily allowance. So the background work is bounded rather than trusted: at most 3 tool
+steps per lookahead, one lookahead per room per 25 seconds, and a hard ceiling of 60 background
+model calls for a whole session. When that ceiling is reached the deterministic detectors carry on,
+because they cost nothing.
+
+Against the quota itself there are two defences. **Keys rotate**: set `GEMINI_API_KEY_2` (and up to
+`_5`) from other projects and a rate-limited key is swapped out mid-call, instantly, with no wait —
+[`src/lib/genai.ts`](src/lib/genai.ts) holds the pool and both the agent and retrieval draw from it.
+Only when every key is cooling does a call wait, and only for as long as the API actually asked for.
+**And `PRUASSIST_MODEL` swaps the model** without a code change; the thinking configuration adapts to
+the family, since the 2.5 series takes `thinkingBudget` and rejects `thinkingLevel` while the 3.x
+series is the reverse and returns a bare 400 for the wrong one.
+
+Every key has to be able to reach the model, which is why the default is `gemini-3.6-flash` rather
+than the 2.5 series: a key issued to a newly created project cannot use `gemini-2.5-flash` and would
+404 on every call.
 
 ### Running it without a browser
 

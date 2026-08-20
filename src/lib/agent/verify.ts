@@ -1,7 +1,8 @@
 import { Type } from "@google/genai";
 import type { Clause } from "../knowledge";
 import type { Hit } from "../retrieval";
-import { callWithRetry, getAi, MODEL, thinking } from "./gemini";
+import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "./gemini";
+import { haveKey } from "../genai";
 import { clauseBlock, HOUSE_RULES } from "./prompts";
 
 // Grounding self-verification, at two speeds.
@@ -61,12 +62,11 @@ export async function verifyGrounding(
   clauses: (Clause | Hit)[],
   { failClosed = false } = {},
 ): Promise<Grounding> {
-  const ai = getAi();
-  if (!ai || !passage.trim() || !clauses.length) {
+  if (!haveKey() || !passage.trim() || !clauses.length) {
     return { grounded: !failClosed, unsupported: [], note: "not verified" };
   }
 
-  const res = await callWithRetry("verify", () =>
+  const res = await callWithRetry("verify", (ai) =>
     ai.models.generateContent({
       model: MODEL,
       contents: `POLICY CLAUSES:\n${clauseBlock(clauses)}\n\nPASSAGE TO CHECK:\n${passage}`,
@@ -84,7 +84,7 @@ export async function verifyGrounding(
         // Pure judgement over a short passage; thinking buys nothing and costs latency.
         thinkingConfig: thinking("off"),
         temperature: 0,
-        maxOutputTokens: 400,
+        maxOutputTokens: JSON_BUDGET,
       },
     }),
   );
@@ -99,6 +99,7 @@ export async function verifyGrounding(
       note: typeof p.note === "string" ? p.note : "",
     };
   } catch {
+    console.error(`[verify] unparseable response: ${(res.text ?? "").trim().slice(0, 120)}`);
     return { grounded: !failClosed, unsupported: [], note: "unparseable verification" };
   }
 }

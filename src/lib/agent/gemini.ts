@@ -1,25 +1,19 @@
-import { GoogleGenAI, ThinkingLevel, type ThinkingConfig } from "@google/genai";
+import type { GoogleGenAI } from "@google/genai";
+import { ThinkingLevel, type ThinkingConfig } from "@google/genai";
+import { cooldownFor, getAi, keyCount, rotateAfterRateLimit, statusOf, TRANSIENT_STATUS } from "../genai";
 
-// One client for everything the agent does. Routes used to construct their own per request, which
-// is harmless but means no connection reuse and no single place to change the model.
+// How the agent talks to Gemini: which model, how hard it should think, and what to do when the
+// quota says no. The keys themselves live in ../genai, which both this and retrieval share.
 
-let client: GoogleGenAI | null = null;
-
-export function getAi(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!client) client = new GoogleGenAI({ apiKey });
-  return client;
-}
+export { getAi };
 
 // The live path and the background path use the same model. Reasoning effort is what differs:
 // the tool loop needs thinking, formatting and grading do not.
 //
-// Overridable because free-tier quota is per project *per model per day* — 20 requests/day on
-// gemini-2.5-flash at the time of writing, which a single lookahead can consume a third of. If a
-// demo runs into that ceiling, pointing PRUASSIST_MODEL at another model is a config change
-// rather than a deploy.
-export const MODEL = process.env.PRUASSIST_MODEL?.trim() || "gemini-2.5-flash";
+// gemini-3.6-flash rather than the 2.5 series because every key has to be able to reach it —
+// 2.5-flash is closed to newly created projects, so a second key added for quota headroom would
+// 404 on every call. Overridable, but any override must be a model all the keys can serve.
+export const MODEL = process.env.PRUASSIST_MODEL?.trim() || "gemini-3.6-flash";
 
 // Bounds on the background work. The deep pass multiplies calls, so it is capped rather than left
 // to run as long as the model likes. Three steps is enough to read the ledger, search once, and
@@ -31,10 +25,10 @@ export const MAX_TOOL_STEPS = 3;
 // reached the ledger keeps running on the deterministic detectors, which cost nothing.
 export const MAX_BACKGROUND_CALLS = 60;
 
-// 503 UNAVAILABLE and 429 are the model saying "not right now". The background pass has time to
-// wait, and without this a demand spike silently turns comprehension tracking off. Anything else
-// is a real error and is not worth a second call.
-const TRANSIENT = [503, 429];
+// Room for a structured answer, with the model's thinking tokens counted against the same budget.
+// That is the trap: on the 3.x series MINIMAL thinking is not zero thinking, so a cap sized for the
+// JSON alone comes back empty and every caller has to treat a perfectly good call as a failure.
+export const JSON_BUDGET = 1600;
 
 // How much the model should think, expressed by intent rather than by number.
 //
@@ -59,31 +53,46 @@ export const resetCallCount = () => {
   calls = 0;
 };
 
-// A 429 usually carries the wait it wants. Retrying sooner burns another quota unit and fails
-// again, so the advertised delay is honoured — up to a ceiling, past which retrying is pointless
-// and the caller should degrade rather than hold a background invocation open.
+// Waiting longer than this is worse than degrading — the caller has a fallback, and a background
+// invocation held open for half a minute is its own problem. Rotating to another key skips it.
 const MAX_BACKOFF_MS = 20_000;
-const DEFAULT_BACKOFF_MS = 1_200;
 
-function backoffFor(e: unknown): number | null {
-  const message = e instanceof Error ? e.message : String(e);
-  const advertised = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(message);
-  if (!advertised) return DEFAULT_BACKOFF_MS;
-  const ms = Math.ceil(Number(advertised[1]) * 1000);
-  return ms > MAX_BACKOFF_MS ? null : ms;
-}
-
-export async function callWithRetry<T>(label: string, call: () => Promise<T>): Promise<T | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+/**
+ * Runs a Gemini call, surviving the two ways the free tier says no.
+ *
+ * On a rate limit it first tries another key — instant, and the usual case once a second project
+ * is configured. Only when every key is cooling does it fall back to waiting out the delay the API
+ * asked for, and only if that delay is short enough to be worth holding the invocation open.
+ *
+ * The client is passed in rather than captured, so a rotation actually takes effect: a closure
+ * over the old client would retry against the key that just ran out.
+ *
+ * `allowSleep: false` is for the live path, where the rep is waiting and a rotation is the only
+ * recovery worth having.
+ */
+export async function callWithRetry<T>(
+  label: string,
+  call: (ai: GoogleGenAI) => Promise<T>,
+  { allowSleep = true } = {},
+): Promise<T | null> {
+  let slept = false;
+  // One attempt per key, plus one more for the sleep-and-retry path.
+  for (let attempt = 0; attempt <= keyCount(); attempt++) {
+    const ai = getAi();
+    if (!ai) return null;
     try {
       calls += 1;
-      return await call();
+      return await call(ai);
     } catch (e) {
-      const status = (e as { status?: number })?.status;
-      const backoff = attempt === 0 && status && TRANSIENT.includes(status) ? backoffFor(e) : null;
-      if (backoff !== null) {
-        await new Promise((r) => setTimeout(r, backoff));
-        continue;
+      const status = statusOf(e);
+      if (status && TRANSIENT_STATUS.includes(status)) {
+        const cool = cooldownFor(e);
+        if (status === 429 && rotateAfterRateLimit(cool)) continue;
+        if (allowSleep && !slept && cool <= MAX_BACKOFF_MS) {
+          await new Promise((r) => setTimeout(r, cool));
+          slept = true;
+          continue;
+        }
       }
       // The message, not the stack: these are expected operational failures, and a stack trace
       // per blip buries the ones that matter.
@@ -91,5 +100,6 @@ export async function callWithRetry<T>(label: string, call: () => Promise<T>): P
       return null;
     }
   }
+  console.error(`[${label}] every key is rate limited`);
   return null;
 }

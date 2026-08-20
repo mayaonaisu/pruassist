@@ -1,6 +1,7 @@
 import { Type } from "@google/genai";
 import { citationsFor, conceptsForArea, type Concept } from "../concepts";
-import { callWithRetry, getAi, MODEL, thinking } from "./gemini";
+import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "./gemini";
+import { haveKey } from "../genai";
 import { clauseBlock, HOUSE_RULES, POINTER_FIELDS, POSTURE } from "./prompts";
 import { runToolLoop } from "./tools";
 import { verifyGrounding } from "./verify";
@@ -56,8 +57,7 @@ export function rankByRisk(state: AgentState): Concept[] {
  * because it would be served instantly and with a citation.
  */
 export async function prepareLookahead(state: AgentState, recent: string): Promise<Lookahead | null> {
-  const ai = getAi();
-  if (!ai) return null;
+  if (!haveKey()) return null;
 
   const target = rankByRisk(state)[0];
   if (!target) return null;
@@ -87,7 +87,7 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
   // output cannot be combined with tools, and on the 2.5 series it also fails when contents merely
   // contains function-call history — so nothing from phase 1 is carried over except its prose.
   let pointers: Pointers & { question: string };
-  const res = await callWithRetry("lookahead", () =>
+  const res = await callWithRetry("lookahead", (ai) =>
     ai.models.generateContent({
       model: MODEL,
       contents:
@@ -105,7 +105,7 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
         // Formatting only — phase 1 already did the reasoning.
         thinkingConfig: thinking("off"),
         temperature: 0.3,
-        maxOutputTokens: 900,
+        maxOutputTokens: JSON_BUDGET * 2,
       },
     }),
   );
