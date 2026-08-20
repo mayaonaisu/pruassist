@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { currentRep } from "@/lib/auth";
 import { buildRecord, loadState, pushAct } from "@/lib/agent/ledger";
 import { deepEnabled, deepPass } from "@/lib/agent/deep";
+import { activeDecision, readinessFor } from "@/lib/agent/readiness";
 import { getByRoom } from "@/lib/sessions";
 import type { AgentState, RepAct, Role, Turn } from "@/lib/agent/types";
 
@@ -15,11 +16,14 @@ export const maxDuration = 60;
 
 function view(state: AgentState) {
   const l = state.lookahead;
+  const decision = activeDecision(state);
   return {
     rev: state.rev,
     alert: state.alert,
     degraded: state.degraded,
     record: buildRecord(state),
+    // What the ledger says about the comparison in play. Null until the conversation touches one.
+    readiness: decision ? readinessFor(decision, state) : null,
     // What the background pass is holding an answer for. Surfaced while idle so the rep can see
     // the assistant is ahead of the conversation rather than only noticing when it lands.
     prepared: l ? { label: l.label, question: l.question, at: l.preparedAt, toolCalls: l.toolCalls } : null,
@@ -28,7 +32,7 @@ function view(state: AgentState) {
 
 // No session record means the shared store is unavailable, not that the room is fake. Say so
 // rather than returning an empty ledger, which would read as "the customer understood nothing".
-const UNAVAILABLE = { unavailable: true, rev: 0, alert: null, degraded: true, record: [], prepared: null };
+const UNAVAILABLE = { unavailable: true, rev: 0, alert: null, degraded: true, record: [], readiness: null, prepared: null };
 
 // Only the shape is trusted; the values are whatever the browser captured.
 function parseTurns(raw: unknown): Turn[] {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Alert, RecordRow } from "./agent/types";
+import type { Readiness } from "./agent/readiness";
 import { windowToSend, type Line } from "./transcript";
 
 // The two-speed loop, from the client's side. One request per cycle carries the transcript window
@@ -21,16 +22,21 @@ export type AgentView = {
   alert: Alert | null;
   record: RecordRow[];
   degraded: boolean;
+  readiness: Readiness | null;
   prepared: Prepared | null;
   unavailable?: boolean;
 };
 
-const EMPTY: AgentView = { rev: 0, alert: null, record: [], degraded: false, prepared: null };
+const EMPTY: AgentView = { rev: 0, alert: null, record: [], degraded: false, readiness: null, prepared: null };
 
 export type Comprehension = {
   agent: AgentView;
-  /** Act on the current alert. Clears it optimistically so the console does not nag. */
-  act: (type: "teach-back-asked" | "dismiss") => void;
+  /**
+   * Act on a concept — the current alert's by default, or a named one when the readiness panel
+   * asks about something the alert is not about. Clears the alert optimistically so the console
+   * does not nag.
+   */
+  act: (type: "teach-back-asked" | "dismiss", conceptId?: string) => void;
   copyTeachBack: () => void;
   askedCopied: boolean;
   ending: boolean;
@@ -89,11 +95,11 @@ export function useComprehension({
 
   // A rep action is not a ledger write: it goes to its own key and the next deep pass folds it in.
   const act = useCallback(
-    (type: "teach-back-asked" | "dismiss") => {
-      const conceptId = agent.alert?.conceptId;
-      if (!conceptId) return;
-      setAgent((a) => ({ ...a, alert: null }));
-      sync({ type, conceptId });
+    (type: "teach-back-asked" | "dismiss", conceptId?: string) => {
+      const target = conceptId ?? agent.alert?.conceptId;
+      if (!target) return;
+      if (target === agent.alert?.conceptId) setAgent((a) => ({ ...a, alert: null }));
+      sync({ type, conceptId: target });
     },
     [agent.alert?.conceptId, sync],
   );
