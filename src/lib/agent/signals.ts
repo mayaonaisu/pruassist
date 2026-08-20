@@ -1,5 +1,5 @@
 import { CONCEPTS, type Concept } from "../concepts";
-import { cosine, embedForSimilarity, lexicalSimilarity, tokenize } from "../retrieval";
+import { cosine, embedForSimilarity, lexicalSimilarity } from "../retrieval";
 import type { SignalKind, Turn } from "./types";
 
 // The comprehension detectors. Every one of them runs on text and timing alone — the Web Speech
@@ -438,9 +438,4 @@ export async function runSignals(
   }
 
   return { detections: out, degraded: scorer.degraded };
-}
-
-// Exported for the replay harness, which prints why a turn scored the way it did.
-export function contentWords(text: string): string[] {
-  return tokenize(text);
 }

@@ -1,5 +1,5 @@
 import { cosine, embedForSimilarity, lexicalSimilarity } from "../retrieval";
-import type { Lookahead, Turn } from "./types";
+import type { Lookahead } from "./types";
 
 // Deciding whether the question that just arrived is the one the background pass prepared for.
 //
@@ -13,15 +13,7 @@ const GATE = { lexical: 0.28, vector: 0.86 };
 // six minutes ago is about a different moment even if the words still match.
 const MAX_AGE_MS = 6 * 60 * 1000;
 
-export type CacheCheck = { hit: boolean; score: number; question: string };
-
-/** The customer's most recent line — what a prepared answer would have to match. */
-export function lastCustomerLine(turns: Turn[]): string {
-  for (let i = turns.length - 1; i >= 0; i--) {
-    if (turns[i].role === "customer") return turns[i].text;
-  }
-  return "";
-}
+type CacheCheck = { hit: boolean; score: number; question: string };
 
 export async function matchesLookahead(look: Lookahead | null, asked: string): Promise<CacheCheck> {
   const miss = { hit: false, score: 0, question: look?.question ?? "" };

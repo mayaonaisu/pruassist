@@ -1,5 +1,5 @@
 import { Type } from "@google/genai";
-import { citationsFor, conceptById, conceptsForArea, type Concept } from "../concepts";
+import { citationsFor, conceptsForArea, type Concept } from "../concepts";
 import { callWithRetry, getAi, MODEL, thinking } from "./gemini";
 import { clauseBlock, HOUSE_RULES, POINTER_FIELDS, POSTURE } from "./prompts";
 import { runToolLoop } from "./tools";
@@ -155,9 +155,4 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
     preparedAt: Date.now(),
     rev: state.rev,
   };
-}
-
-/** The label for a prepared concept, for the console's "prepared for" hint. */
-export function lookaheadLabel(l: Lookahead): string {
-  return conceptById(l.conceptId)?.label ?? l.label;
 }
