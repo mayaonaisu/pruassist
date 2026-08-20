@@ -31,6 +31,7 @@ const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
 const { lastFromCustomer, newestAt, toTurns, windowToSend } = await import("../src/lib/transcript.ts");
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
+const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
 
 type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
@@ -362,6 +363,70 @@ test("a comparison question is recognised, an explanation question is not", () =
   assert.equal(looksComparative("What is the difference between Premier and Plus?", tier), true);
   assert.equal(looksComparative("Which plan should I take?", tier), true);
   assert.equal(looksComparative("What is a deductible?", tier), false);
+});
+
+/* ---------- readiness ---------- */
+
+// Builds a ledger in which the named concepts have reached the named states.
+function ledgerWith(pairs: [string, "raised" | "asserted" | "demonstrated" | "misunderstood"][]) {
+  let s = emptyState("r", AREA);
+  pairs.forEach(([conceptId, argues], i) => {
+    s = applyDetections(s, [detection({ conceptId, argues, turnIndex: i, at: AT + i * 1000 })]);
+  });
+  return s;
+}
+
+test("a recommendation is not ready while a differentiator is unshown", () => {
+  const tier = decisionById("which-tier")!;
+  const r = readinessFor(tier, ledgerWith([
+    ["deductible-definition", "demonstrated"],
+    ["pro-ration", "demonstrated"],
+    ["deductible-amounts", "demonstrated"],
+    ["limits-of-cover", "asserted"],
+  ]));
+  assert.equal(r.ready, false);
+  // Only differentiators are counted: the prerequisite demonstrated above is not one of them.
+  assert.equal(r.settled, 2);
+  assert.equal(r.total, 3);
+  assert.ok(r.open.some((s) => s.conceptId === "limits-of-cover"));
+  assert.equal(r.nextConceptId, "limits-of-cover");
+  assert.ok(r.nextQuestion && r.nextQuestion.length > 0);
+});
+
+test("a recommendation is ready once every differentiator is shown", () => {
+  const tier = decisionById("which-tier")!;
+  const r = readinessFor(tier, ledgerWith([
+    ["pro-ration", "demonstrated"],
+    ["deductible-amounts", "demonstrated"],
+    ["limits-of-cover", "demonstrated"],
+  ]));
+  assert.equal(r.ready, true, "prerequisites must not gate the recommendation");
+  assert.equal(r.nextConceptId, "deductible-definition", "but an unsettled prerequisite is still worth asking");
+});
+
+test("a misunderstood concept blocks, and never counts as merely open", () => {
+  const tier = decisionById("which-tier")!;
+  const r = readinessFor(tier, ledgerWith([
+    ["pro-ration", "misunderstood"],
+    ["deductible-amounts", "demonstrated"],
+    ["limits-of-cover", "demonstrated"],
+  ]));
+  assert.equal(r.ready, false);
+  assert.deepEqual(r.blocking.map((s) => s.conceptId), ["pro-ration"]);
+  assert.ok(!r.open.some((s) => s.conceptId === "pro-ration"));
+  assert.equal(r.nextConceptId, "pro-ration", "correcting a misconception outranks everything");
+});
+
+test("the next question prefers agreed-but-unshown over never-raised", () => {
+  const tier = decisionById("which-tier")!;
+  const r = readinessFor(tier, ledgerWith([["deductible-amounts", "asserted"]]));
+  assert.equal(r.nextConceptId, "deductible-amounts");
+});
+
+test("the active decision is the one the conversation is actually about", () => {
+  assert.equal(activeDecision(emptyState("r", AREA)), null);
+  assert.equal(activeDecision(ledgerWith([["pro-ration", "asserted"]]))?.id, "which-tier");
+  assert.equal(activeDecision(ledgerWith([["stop-loss", "asserted"], ["panel-providers", "misunderstood"]]))?.id, "add-pruextra");
 });
 
 /* ---------- the scoring pass ---------- */
