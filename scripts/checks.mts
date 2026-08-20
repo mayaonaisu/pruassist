@@ -156,6 +156,24 @@ test("risk order puts a misconception above a bare assent, and both above silenc
   assert.ok(order.includes("stop-loss"), "a material concept never raised is still worth preparing");
 });
 
+test("the lookahead prefers a concept blocking the decision in play", () => {
+  // Two concepts at the same ledger state; only one decides the comparison being discussed.
+  // `limits-of-cover` is declared after `medisave-premiums` in CONCEPTS, so at equal risk the
+  // stable sort puts medisave first — the assertion only holds once the decision bonus exists.
+  let s = emptyState("r", AREA);
+  s = applyDetections(s, [
+    detection({ conceptId: "medisave-premiums", argues: "asserted", kind: "assent" }),
+    detection({ conceptId: "limits-of-cover", argues: "asserted", kind: "assent", turnIndex: 1, at: AT + 1000 }),
+    // Puts which-tier in play: limits-of-cover and pro-ration are its differentiators, medisave is not.
+    detection({ conceptId: "pro-ration", argues: "asserted", kind: "assent", turnIndex: 2, at: AT + 2000 }),
+  ]);
+  const order = rankByRisk(s).map((c) => c.id);
+  assert.ok(
+    order.indexOf("limits-of-cover") < order.indexOf("medisave-premiums"),
+    `expected a which-tier differentiator first, got ${order.join(" > ")}`,
+  );
+});
+
 test("a demonstrated concept is not worth preparing for", () => {
   let s = emptyState("r", AREA);
   s = applyDetections(s, [detection({ conceptId: "stop-loss", argues: "demonstrated" })]);

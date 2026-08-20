@@ -3,6 +3,7 @@ import { citationsFor, conceptsForArea, type Concept } from "../concepts";
 import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "./gemini";
 import { haveKey } from "../genai";
 import { clauseBlock, HOUSE_RULES, POINTER_FIELDS, POSTURE } from "./prompts";
+import { activeDecision } from "./readiness";
 import { runToolLoop } from "./tools";
 import { verifyGrounding } from "./verify";
 import type { AgentState, Lookahead, Pointers } from "./types";
@@ -31,6 +32,13 @@ const SCHEMA = {
 
 /** Risk order: wrong beats agreed-but-unshown beats material-and-never-raised. */
 export function rankByRisk(state: AgentState): Concept[] {
+  // A concept standing between the representative and a recommendation is worth preparing for
+  // ahead of an equally unresolved one that decides nothing. Deliberately smaller than the gap
+  // between two risk bands — even counting a re-ask — so it breaks ties without ever letting a
+  // never-raised concept overtake a false assent.
+  const decision = activeDecision(state);
+  const deciding = new Set(decision?.differentiators ?? []);
+
   const scored = conceptsForArea(state.productArea).map((c) => {
     const e = state.concepts[c.id];
     let risk = 0;
@@ -40,6 +48,7 @@ export function rankByRisk(state: AgentState): Concept[] {
     else if (e.state === "raised") risk = 1;
     // Coming back to a topic is evidence it is unresolved, whatever state it reached.
     if (e?.reAsks) risk += 0.5;
+    if (risk > 0 && deciding.has(c.id)) risk += 0.25;
     // A settled concept is not worth preparing for.
     if (e?.state === "demonstrated") risk = 0;
     return { c, risk };
