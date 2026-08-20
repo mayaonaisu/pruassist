@@ -227,18 +227,35 @@ function CustomerStage({ name }: { name: string }) {
     room?.disconnect().catch(() => {});
   };
 
+  // The control bar sits on paper, so an "on" control is dark-on-light. It previously carried
+  // white text on a 10%-white fill left over from the dark bar, which made a live mic invisible.
   const pill: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
+    justifyContent: "center",
     gap: 8,
-    padding: "11px 18px",
+    padding: "12px 20px",
+    minHeight: 44, // touch target — this bar is used on a phone
     borderRadius: 999,
     fontSize: 14,
-    fontWeight: 700,
+    fontWeight: 500,
     cursor: "pointer",
     fontFamily: "inherit",
-    color: "#fff",
     lineHeight: 1,
+  };
+  const on: React.CSSProperties = {
+    ...pill,
+    background: "transparent",
+    border: "1px solid var(--rule-strong)",
+    color: "var(--ink-2)",
+  };
+  // "Off" is the state the customer must be able to spot instantly — it means they are not
+  // being heard or seen, so it reads as the one loud thing on the bar.
+  const off: React.CSSProperties = {
+    ...pill,
+    background: "var(--pru)",
+    border: "1px solid var(--pru)",
+    color: "#fff",
   };
 
   return (
@@ -253,8 +270,10 @@ function CustomerStage({ name }: { name: string }) {
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          gap: 12,
-          padding: "16px 20px",
+          gap: 10,
+          flexWrap: "wrap",
+          padding: "14px 16px",
+          paddingBottom: "max(14px, env(safe-area-inset-bottom))",
           background: "var(--brochure)",
           borderTop: "1px solid var(--rule)",
         }}
@@ -262,24 +281,26 @@ function CustomerStage({ name }: { name: string }) {
         <button
           type="button"
           onClick={toggleMic}
+          aria-pressed={!micOn}
           title={micOn ? "Mute microphone" : "Unmute microphone"}
-          style={{ ...pill, background: micOn ? "rgba(255,255,255,0.10)" : "#d11f2d", border: micOn ? "1px solid rgba(255,255,255,0.16)" : "1px solid #d11f2d" }}
+          style={micOn ? on : off}
         >
-          {micOn ? "🎙 Mute" : "🔇 Unmute"}
+          {micOn ? "Mute" : "Unmute"}
         </button>
         <button
           type="button"
           onClick={toggleCam}
+          aria-pressed={!camOn}
           title={camOn ? "Turn camera off" : "Turn camera on"}
-          style={{ ...pill, background: camOn ? "rgba(255,255,255,0.10)" : "#d11f2d", border: camOn ? "1px solid rgba(255,255,255,0.16)" : "1px solid #d11f2d" }}
+          style={camOn ? on : off}
         >
-          {camOn ? "📹 Stop video" : "📷 Start video"}
+          {camOn ? "Stop video" : "Start video"}
         </button>
         <button
           type="button"
           onClick={leave}
           title="Leave the call"
-          style={{ ...pill, background: "#b3111d", border: "1px solid #b3111d", marginLeft: 8 }}
+          style={{ ...on, borderColor: "var(--pru-line)", color: "var(--pru)" }}
         >
           Leave
         </button>
