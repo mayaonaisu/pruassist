@@ -28,6 +28,7 @@ const { isBareAssent, isQuestion } = await import("../src/lib/agent/utterance.ts
 const { runSignals } = await import("../src/lib/agent/signals.ts");
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
+const { lastFromCustomer, newestAt, toTurns } = await import("../src/lib/transcript.ts");
 
 type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
@@ -356,6 +357,42 @@ test("at zero budget the detectors still run but nothing is graded", async () =>
 
   assert.ok(scored.detections.length > 0, "detectors are not gated by the model budget");
   assert.ok(!scored.detections.some((d) => d.kind === "explain-back"), "graded with no budget for it");
+});
+
+/* ---------- the console's transcript rules ---------- */
+
+// The console's own logic is React and cannot be driven from here, but the decisions that matter
+// were pulled out of it as plain functions: who a line belongs to, and which lines are new.
+
+test("everyone who is not the rep is the customer", () => {
+  const lines = [
+    { id: "1", at: AT, speaker: "Bryan Eng", text: "The deductible comes first." },
+    { id: "2", at: AT + 1000, speaker: "Mei Ling", text: "Okay." },
+    { id: "3", at: AT + 2000, speaker: "Customer", text: "And after that?" },
+  ];
+  assert.deepEqual(
+    toTurns(lines, "Bryan Eng").map((t) => t.role),
+    ["rep", "customer", "customer"],
+  );
+  // The rep's own name is the only thing that decides it — a renamed participant is still not
+  // the representative.
+  assert.deepEqual(
+    toTurns(lines, "Someone Else").map((t) => t.role),
+    ["customer", "customer", "customer"],
+  );
+});
+
+test("the question sent for the prepared-answer check is the customer's last line", () => {
+  const lines = [
+    { id: "1", at: AT, speaker: "Mei Ling", text: "What is a deductible?" },
+    { id: "2", at: AT + 1000, speaker: "Bryan Eng", text: "It is the amount you pay first." },
+    { id: "3", at: AT + 2000, speaker: "Mei Ling", text: "So how much would that be?" },
+    { id: "4", at: AT + 3000, speaker: "Bryan Eng", text: "It depends on the ward." },
+  ];
+  assert.equal(lastFromCustomer(lines, "Bryan Eng"), "So how much would that be?");
+  assert.equal(lastFromCustomer([], "Bryan Eng"), "");
+  assert.equal(newestAt(lines), AT + 3000);
+  assert.equal(newestAt([]), 0);
 });
 
 /* ---------- the cache gate ---------- */

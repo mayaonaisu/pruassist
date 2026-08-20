@@ -10,6 +10,9 @@ export type SessionInfo = {
 
 export type Stats = { surfaced: number; used: number; flags: number; docs: number };
 
+// What the live console knows about comprehension, handed to the brief when the session ends.
+export type Comprehension = Pick<SummaryData, "record" | "customerName">;
+
 export type SummaryData = {
   concerns: string[];
   talkingPoints: string[];

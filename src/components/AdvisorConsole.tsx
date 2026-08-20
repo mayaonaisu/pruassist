@@ -4,9 +4,9 @@ import { useCallback, useState } from "react";
 import Chrome from "./Chrome";
 import IntroStep from "./steps/IntroStep";
 import ConsentStep from "./steps/ConsentStep";
-import LiveStep, { type Comprehension } from "./steps/LiveStep";
+import LiveStep from "./steps/LiveStep";
 import SummaryStep from "./steps/SummaryStep";
-import type { SessionInfo, Stats, SummaryData } from "@/lib/console-types";
+import type { Comprehension, SessionInfo, Stats, SummaryData } from "@/lib/console-types";
 
 type Narrative = Pick<SummaryData, "concerns" | "talkingPoints" | "followUps" | "notes">;
 

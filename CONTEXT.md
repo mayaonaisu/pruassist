@@ -1,11 +1,18 @@
 # Domain vocabulary
 
-The words this codebase uses precisely, and the module that owns each. Started with the terms the
-scoring refactor named; add to it as more get sharpened rather than letting definitions live only
-in comments.
+The words this codebase uses precisely, and the module that owns each. Add to it as terms get
+sharpened, rather than letting definitions live only in comments.
 
 For architecture vocabulary — module, interface, seam, depth — see the `codebase-design` skill.
 These are the *domain* terms.
+
+## The thesis, in one paragraph
+
+Every product in this category models **the rep**: did they say the disclosure, did they handle the
+objection. PRUAssist models the **customer**, because two separately-attributed transcripts make
+that possible and because what a suitability record actually needs is evidence of comprehension,
+not evidence of agreement. Everything below is in service of one distinction: **asserted is not
+demonstrated**.
 
 ## Concept
 
@@ -85,8 +92,66 @@ replay harness calls it rather than restating it, so the fixtures cannot drift f
 `deepPass` ([`deep.ts`](src/lib/agent/deep.ts)) is the I/O around it: the store, the acts queue, the
 revision counter, the model-call budget and the lookahead.
 
+## Alert
+
+The one thing shown to the rep mid-call, chosen by risk from the whole ledger. A second alert
+competing for attention during a live conversation is worse than none, so `chooseAlert` returns at
+most one. Five kinds: **false assent**, **misunderstood**, **divergence**, **explain-back**,
+**re-ask**.
+
+**False assent** is the signature moment: the customer agreed, the ledger has no evidence they
+understood, and the alert says so with the pause and the returned-to question as corroboration.
+It is the case every other product in this category treats as a success.
+
+An alert presents evidence and suggests a question. It never blocks the rep, never scores the rep,
+and never speaks to the customer. That is also the answer when someone asks what happens if the AI
+is wrong: the record states what was observed, never a verdict.
+
+## Teach-back
+
+The question that would settle a concept, authored per concept — "if your bill came to S$8,000 at a
+panel hospital, what would you expect to pay first?" The rep presses **Asked it**, which is a
+**rep act**: it goes to its own store key rather than into the ledger, so it can never race the
+deep pass. The customer's next substantive reply is then graded once against the clause, and the
+grade names *which part* was wrong rather than returning a score.
+
+## Lookahead
+
+Speculative execution for a conversation. The ledger is ranked by risk — got it wrong beats agreed
+without showing beats material and never raised — and the background pass runs a tool loop over the
+riskiest concept, writes the answer and grounding-checks it before caching. When the question
+arrives, `/api/assist` serves it with no model call.
+
+Aimed at *this* customer's unresolved concepts, which is what separates it from predicting a
+generic next question. An answer that fails verification is dropped rather than cached: served
+instantly and with a citation, an ungrounded answer is worse than a cache miss.
+
+## Grounding
+
+Every figure and claim must come from a retrieved clause. Checked at two speeds: a model checks the
+whole answer on the background path, and on the live path a deterministic check confirms every
+figure in the suggested line appears in the cited pages. The live check **labels rather than
+blocks** — a hypothetical the rep offers the customer is legitimate, and the rep decides what to
+say.
+
+## Understanding Record
+
+The artifact. One row per material concept: the state it reached, the customer's own timestamped
+words as evidence, the brochure pages, and what is still open. Signed with the rep's consent
+signature and exported with the brief.
+
+It is the reason the privacy property changed: the raw transcript is still never persisted, but
+concept-tied quotes are, for 24 hours, and both consent screens say so.
+
 ## Degraded
 
 Detection ran on word overlap alone because embeddings were unavailable. Thresholds differ between
 the two modes, so this is tracked rather than hidden — the console says so, and the replay harness
 runs both paths.
+
+## Replay harness
+
+`npm run replay` — a scripted two-speaker transcript through the real detectors and the real
+ledger, no browser and no second device. It is the development loop, and the deterministic fallback
+if live demo conditions are bad. Fixtures declare the state they expect, so the run fails when a
+change breaks one.
