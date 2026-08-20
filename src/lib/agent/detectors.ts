@@ -178,13 +178,15 @@ export function buildContext(
   };
 }
 
-// Every detection is about the turn in hand, so only the three fields that vary are written out.
+// Every detection is about the turn in hand, so only the fields that vary are written out — the
+// rest, `role` included, come from the turn the detector was given.
 function detection(
   ctx: TurnContext,
   fields: { conceptId: string; kind: SignalKind; argues: Detection["argues"]; detail: string; score: number },
 ): Detection {
   return {
     ...fields,
+    role: ctx.turn.role,
     turnIndex: ctx.index,
     at: ctx.turn.at,
     quote: normaliseQuote(ctx.turn.text),

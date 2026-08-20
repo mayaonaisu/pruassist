@@ -56,7 +56,7 @@ export function applyDetections(state: AgentState, detections: Detection[]): Age
 
     const ev: Evidence = {
       at: d.at,
-      role: d.argues === "raised" ? "rep" : "customer",
+      role: d.role,
       quote: d.quote,
       signal: d.kind,
       detail: d.detail,

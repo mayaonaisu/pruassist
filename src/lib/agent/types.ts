@@ -28,6 +28,10 @@ export type Detection = {
   conceptId: string;
   kind: SignalKind;
   argues: "raised" | "asserted" | "demonstrated" | "misunderstood" | null;
+  // Whose words these are. Carried from the turn the detector was looking at, never derived —
+  // the record quotes the customer, and a rep's sentence attributed to them would be a lie in the
+  // one artifact where that matters.
+  role: Role;
   turnIndex: number;
   at: number;
   quote: string;

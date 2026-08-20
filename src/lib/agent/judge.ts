@@ -123,6 +123,7 @@ export async function gradeTeachBacks(state: AgentState, turns: Turn[]): Promise
       conceptId: id,
       kind: "explain-back",
       argues,
+      role: answer.role,
       turnIndex: index,
       at: answer.at,
       quote: normaliseQuote(answer.text),

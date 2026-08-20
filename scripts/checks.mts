@@ -41,6 +41,9 @@ function detection(over: Partial<Detection>): Detection {
     conceptId: "deductible-definition",
     kind: "uptake",
     argues: "raised",
+    // Only `raised` comes from a rep turn, so this is the right default for fabricated
+    // detections. Production never guesses — the detector copies it off the turn.
+    role: over.argues === "raised" || over.argues === undefined ? "rep" : "customer",
     turnIndex: 0,
     at: AT,
     quote: "q",
@@ -264,6 +267,27 @@ test("a pause is reported above two seconds and not below", async () => {
     slow.every((d) => d.kind !== "latency" || d.argues === null),
     "timing must never argue for a state",
   );
+});
+
+test("role is carried from the turn, never derived from what the detector argues", async () => {
+  const turns: Turn[] = [
+    { at: AT, role: "rep", speaker: "rep", text: DEDUCTIBLE_EXPLAINED },
+    { at: AT + 8000, role: "customer", speaker: "customer", text: "So I pay the first chunk myself each year, and only after that does the insurance start paying." },
+    { at: AT + 20000, role: "customer", speaker: "customer", text: "How much would I have to pay upfront on the day?" },
+  ];
+  const { detections } = await runSignals(turns, conceptsForArea(AREA), 0);
+  assert.ok(detections.length > 0);
+  for (const d of detections) {
+    assert.equal(d.role, turns[d.turnIndex].role, `${d.kind} on turn ${d.turnIndex} carried the wrong role`);
+  }
+
+  // And the ledger copies it rather than re-deriving. A rep-side detection that argues something
+  // other than `raised` does not exist today; the point is that if one ever did, the record would
+  // not quote the representative as if the customer had said it.
+  const s = applyDetections(emptyState("r", AREA), [
+    detection({ argues: "asserted", kind: "assent", role: "rep", quote: "the rep said this" }),
+  ]);
+  assert.equal(s.concepts["deductible-definition"].evidence[0].role, "rep");
 });
 
 test("dropping every qualifier the rep used is a divergence", async () => {
