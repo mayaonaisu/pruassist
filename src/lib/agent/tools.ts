@@ -1,5 +1,6 @@
 import { Type, type Content, type FunctionDeclaration, type Part } from "@google/genai";
 import { conceptsForArea } from "../concepts";
+import { decisionById } from "../decisions";
 import { clauseById } from "../knowledge";
 import { retrieve, type Hit } from "../retrieval";
 import { callWithRetry, JSON_BUDGET, MAX_TOOL_STEPS, MODEL, thinking } from "./gemini";
@@ -45,11 +46,15 @@ export const DECLARATIONS: FunctionDeclaration[] = [
   {
     name: "compare_options",
     description:
-      "Fetch the clauses describing the plan tiers and add-on combinations, for questions of the " +
-      "form 'which one should I take' or 'what is the difference between'.",
+      "Fetch the clauses describing the options in a decision the customer is weighing, for " +
+      "questions of the form 'which one should I take' or 'what is the difference between'. Pass " +
+      "the decisionId when you know it — 'which-tier' or 'add-pruextra'.",
     parameters: {
       type: Type.OBJECT,
-      properties: { focus: { type: Type.STRING, description: "What to compare on, e.g. 'where I can be treated'." } },
+      properties: {
+        focus: { type: Type.STRING, description: "What to compare on, e.g. 'where I can be treated'." },
+        decisionId: { type: Type.STRING, description: "Optional decision id: 'which-tier' or 'add-pruextra'." },
+      },
       required: ["focus"],
     },
   },
@@ -87,9 +92,12 @@ async function runTool(name: string, args: Record<string, unknown>, ctx: ToolCon
       return { cited: [], result: { productArea: ctx.productArea, concepts: ledgerDigest(ctx.state) } };
     case "compare_options": {
       const focus = typeof args.focus === "string" ? args.focus : "";
-      // Comparison always rests on the same clauses, so they are named rather than searched for;
-      // the search only adds whatever the rep is comparing on.
-      const fixed = COMPARISON_CLAUSES.map(clauseById)
+      const decision = typeof args.decisionId === "string" ? decisionById(args.decisionId) : null;
+      // A named decision brings the clauses that describe its own options; otherwise fall back to
+      // the general comparison set. The search only adds whatever the rep is comparing on.
+      const ids = decision ? [...new Set(decision.options.flatMap((o) => o.clauseIds))] : COMPARISON_CLAUSES;
+      const fixed = ids
+        .map(clauseById)
         .filter((c) => c !== undefined)
         .map((c) => ({ ...c, score: 1 }) as Hit);
       const extra = await retrieve(focus || "difference between the plans", 2, ctx.productArea);

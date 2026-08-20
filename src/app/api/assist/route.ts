@@ -6,7 +6,9 @@ import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "@/lib/agent/gemini"
 import { haveKey } from "@/lib/genai";
 import { loadState } from "@/lib/agent/ledger";
 import { matchesLookahead } from "@/lib/agent/cache";
-import { clauseBlock, pointerSystemInstruction } from "@/lib/agent/prompts";
+import { activeDecision, readinessFor } from "@/lib/agent/readiness";
+import { looksComparative } from "@/lib/decisions";
+import { clauseBlock, comparisonSystemInstruction, pointerSystemInstruction } from "@/lib/agent/prompts";
 import { unsupportedFigures } from "@/lib/agent/verify";
 
 export const runtime = "nodejs";
@@ -34,10 +36,12 @@ export async function POST(req: NextRequest) {
   const session = typeof roomId === "string" && roomId ? await getByRoom(roomId) : null;
   const productArea = session?.context.productArea;
 
+  // The ledger, loaded once: the cache gate reads it, and so does the comparison instruction.
+  const state = session ? await loadState(roomId, session.context.productArea) : null;
+
   // 0) CACHE — did the background pass already prepare, and verify, the answer to this question?
-  if (session) {
-    const state = await loadState(roomId, session.context.productArea);
-    const question = typeof asked === "string" && asked.trim() ? asked : transcript.split("\n").slice(-1)[0] ?? "";
+  if (state) {
+    const question = typeof asked === "string" && asked.trim() ? asked : (transcript.split("\n").slice(-1)[0] ?? "");
     const check = await matchesLookahead(state.lookahead, question);
     if (check.hit && state.lookahead) {
       const l = state.lookahead;
@@ -61,6 +65,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ note: "No policy clause covers this yet — keep listening, or ask the customer to be more specific." });
   }
 
+  // A comparison is a different job from an explanation: it has to say what is not yet settled.
+  const decision = state ? activeDecision(state) : null;
+  const comparing =
+    decision && state && typeof asked === "string" && asked.trim() ? looksComparative(asked, decision) : false;
+  const instruction =
+    comparing && decision && state
+      ? comparisonSystemInstruction(decision, readinessFor(decision, state), productArea)
+      : pointerSystemInstruction(productArea);
+
   // 2) GENERATE a structured set of private pointers, grounded in those clauses.
   // allowSleep is off: a rate limit rotates to another key if one is free, but the rep is waiting,
   // so it never blocks on a cooldown — it degrades to a note instead.
@@ -71,7 +84,7 @@ export async function POST(req: NextRequest) {
         model: MODEL,
         contents: `POLICY CLAUSES:\n${clauseBlock(hits)}\n\nRECENT TRANSCRIPT:\n${transcript}`,
         config: {
-          systemInstruction: pointerSystemInstruction(productArea),
+          systemInstruction: instruction,
           responseMimeType: "application/json",
           thinkingConfig: thinking("off"),
           temperature: 0.3,
@@ -110,6 +123,7 @@ export async function POST(req: NextRequest) {
     ...pointers,
     sources: hits.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) })),
     cached: false,
+    comparing,
     unsupportedFigures: unsupportedFigures(spoken, hits),
   });
 }
