@@ -217,7 +217,24 @@ npm run build && npx next start -p 3100
 BASE=http://127.0.0.1:3100 npm run e2e
 ```
 
-Point it at a Vercel preview too. `next dev` and `next start` both keep the process alive forever,
+### Rehearsing the console alone
+
+The console needs a customer talking to it, which is awkward to arrange by yourself. `drive` pushes
+a scripted exchange into whichever session is currently live, so the alert appears in the open
+console with no second device:
+
+```bash
+npm run drive                                        # the false assent
+npm run drive -- fixtures/panel-misconception.json   # the misconception catch
+npm run drive -- --list                              # which sessions are live
+```
+
+Against a deployment, set `BASE=https://your-app.vercel.app`. It finds the room by reading
+`sess:room:*` from Upstash, so it works the same either way. The injected lines do not appear in
+the transcript pane — that renders what the browser itself heard — but the alert, the strip and the
+record all update normally.
+
+Point the smoke test at a Vercel preview too. `next dev` and `next start` both keep the process alive forever,
 so neither proves `after()` survives a real serverless invocation. Budget it: one run spends about
 twenty Gemini calls and the free tier allows twenty per model per day.
 
