@@ -59,6 +59,20 @@ export const resetCallCount = () => {
   calls = 0;
 };
 
+// A 429 usually carries the wait it wants. Retrying sooner burns another quota unit and fails
+// again, so the advertised delay is honoured — up to a ceiling, past which retrying is pointless
+// and the caller should degrade rather than hold a background invocation open.
+const MAX_BACKOFF_MS = 20_000;
+const DEFAULT_BACKOFF_MS = 1_200;
+
+function backoffFor(e: unknown): number | null {
+  const message = e instanceof Error ? e.message : String(e);
+  const advertised = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(message);
+  if (!advertised) return DEFAULT_BACKOFF_MS;
+  const ms = Math.ceil(Number(advertised[1]) * 1000);
+  return ms > MAX_BACKOFF_MS ? null : ms;
+}
+
 export async function callWithRetry<T>(label: string, call: () => Promise<T>): Promise<T | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -66,8 +80,9 @@ export async function callWithRetry<T>(label: string, call: () => Promise<T>): P
       return await call();
     } catch (e) {
       const status = (e as { status?: number })?.status;
-      if (attempt === 0 && status && TRANSIENT.includes(status)) {
-        await new Promise((r) => setTimeout(r, 1200));
+      const backoff = attempt === 0 && status && TRANSIENT.includes(status) ? backoffFor(e) : null;
+      if (backoff !== null) {
+        await new Promise((r) => setTimeout(r, backoff));
         continue;
       }
       // The message, not the stack: these are expected operational failures, and a stack trace

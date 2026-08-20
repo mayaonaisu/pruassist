@@ -63,47 +63,61 @@ export async function deepPass({ roomId, productArea, turns, force }: DeepInput)
   const scored = await scorePass({ state, turns: ordered, pool, budget: budgetLeft });
   if (scored.scoredFrom === -1) return { ran: false, reason: "no-new-turns" };
 
-  // rev exists so the client can poll cheaply — that is this module's concern, not the scorer's.
+  // The ledger is written before any speculative work starts. The lookahead is a tool loop that
+  // can take tens of seconds under throttling, and the rep's alert must not sit behind it — that
+  // would put the expensive stage back on the path the two-speed design exists to keep clear.
+  //
+  // rev exists so the client can poll cheaply, which is this module's concern, not the scorer's.
+  const scoringSpend = callsMade();
   let next: AgentState = {
     ...scored.state,
     updatedAt: Date.now(),
     rev: scored.changed ? scored.state.rev + 1 : scored.state.rev,
+    backgroundCalls: state.backgroundCalls + scoringSpend,
   };
+
+  if (!(await saveState(next, loaded.rev))) return { ran: false, reason: "write-lost" };
+
+  if (budgetLeft > 0 && budgetLeft - scoringSpend <= 0) {
+    console.warn(`[agent] ${roomId} background call budget spent; detectors continue without the model`);
+  }
 
   // Prepare the likeliest next question only once the ledger has something to reason from, and
   // never more often than the ceiling above.
   let prepared = false;
-  const canPrepare = budgetLeft - callsMade() >= MAX_TOOL_STEPS + 2;
+  const canPrepare = budgetLeft - scoringSpend >= MAX_TOOL_STEPS + 2;
   if (lookaheadEnabled() && scored.changed && canPrepare && Date.now() - next.lookaheadTriedAt >= LOOKAHEAD_MIN_MS) {
     const recent = ordered
       .slice(-LOOKAHEAD_CONTEXT_TURNS)
       .map((t) => `${t.role === "rep" ? "Rep" : "Customer"}: ${t.text}`)
       .join("\n");
+    let look = null;
     try {
-      const look = await prepareLookahead(next, recent);
-      next = { ...next, lookahead: look ?? next.lookahead, lookaheadTriedAt: Date.now() };
-      prepared = look !== null && look !== state.lookahead;
+      look = await prepareLookahead(next, recent);
     } catch (e) {
-      // Never let speculative work take the ledger down with it.
+      // Never let speculative work take the ledger down with it. The ledger is already saved.
       console.error(`[agent] lookahead failed for ${roomId}:`, e);
-      next = { ...next, lookaheadTriedAt: Date.now() };
     }
+    prepared = look !== null && look !== state.lookahead;
+    const withLookahead: AgentState = {
+      ...next,
+      lookahead: look ?? next.lookahead,
+      lookaheadTriedAt: Date.now(),
+      backgroundCalls: next.backgroundCalls + (callsMade() - scoringSpend),
+      updatedAt: Date.now(),
+      // A newly prepared answer is a change the console shows, so the poll should notice it.
+      rev: prepared ? next.rev + 1 : next.rev,
+    };
+    // Best-effort: losing this write costs a lookahead, never the ledger.
+    if (await saveState(withLookahead, next.rev)) next = withLookahead;
   }
 
-  const spent = callsMade();
-  next = { ...next, backgroundCalls: next.backgroundCalls + spent };
-  if (budgetLeft > 0 && budgetLeft - spent <= 0) {
-    console.warn(`[agent] ${roomId} background call budget spent; detectors continue without the model`);
-  }
-
-  const written = await saveState(next, loaded.rev);
-  if (!written) return { ran: false, reason: "write-lost" };
   return {
     ran: true,
     state: next,
     detections: scored.detections.length,
     graded: scored.detections.filter((d) => d.kind === "explain-back").length,
     prepared,
-    spent,
+    spent: callsMade(),
   };
 }

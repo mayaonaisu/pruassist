@@ -138,7 +138,11 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
     { failClosed: true },
   );
   if (!check.grounded) {
-    console.warn(`[lookahead] dropped ungrounded answer for ${target.id}: ${check.unsupported.join(" | ")}`);
+    // Two different reasons, and they mean different things: a claim the clauses do not support,
+    // or a verification that could not run. Both drop the answer; only one is the model's fault.
+    console.warn(
+      `[lookahead] dropped answer for ${target.id}: ${check.unsupported.length ? check.unsupported.join(" | ") : check.note || "not verified"}`,
+    );
     return null;
   }
 

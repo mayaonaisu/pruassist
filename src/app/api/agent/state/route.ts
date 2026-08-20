@@ -89,9 +89,13 @@ export async function POST(req: NextRequest) {
     after(async () => {
       try {
         const outcome = await deepPass({ roomId, productArea, turns, force: body?.final === true });
-        if (outcome.ran) {
-          console.log(`[agent] ${roomId} rev=${outcome.state.rev} detections=${outcome.detections}`);
-        }
+        // Both outcomes are logged. A pass that declines to run is not a failure, but silence
+        // makes "the ledger never moved" impossible to diagnose from outside.
+        console.log(
+          outcome.ran
+            ? `[agent] ${roomId} rev=${outcome.state.rev} detections=${outcome.detections} graded=${outcome.graded} calls=${outcome.spent}`
+            : `[agent] ${roomId} skipped: ${outcome.reason}`,
+        );
       } catch (e) {
         // Comprehension tracking must never take the live console down with it. Degrade to the
         // previous behaviour, but log loudly — a swallowed failure here is invisible.

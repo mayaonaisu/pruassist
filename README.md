@@ -201,12 +201,25 @@ order, the question it expects next, the tool calls it actually made, and whethe
 grounding verification. It is opt-in because it is several model calls.
 
 The pure functions — the state machine's rank guard, the risk ranking, the record builder, the
-grounding figure check and the cache gate — have their own checks, which run offline in about a
-second:
+grounding figure check, the cache gate and the console's send rule — have their own checks, which
+run offline in about a second:
 
 ```bash
 npm run check
 ```
+
+And the wiring around all of it — auth, the session record, `after()` actually firing, the
+teach-back act and its grade, the lookahead and the cache hit it produces, and the evidence being
+deleted when the session ends — has a smoke test that talks HTTP to a running server:
+
+```bash
+npm run build && npx next start -p 3100
+BASE=http://127.0.0.1:3100 npm run e2e
+```
+
+Point it at a Vercel preview too. `next dev` and `next start` both keep the process alive forever,
+so neither proves `after()` survives a real serverless invocation. Budget it: one run spends about
+twenty Gemini calls and the free tier allows twenty per model per day.
 
 ## Video and transcription
 
