@@ -20,8 +20,7 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      // Parse only after checking res.ok — an HTML error page from a proxy would otherwise throw
-      // a JSON syntax error and show the rep a raw parser message.
+      // Parse only after res.ok, or a proxy's HTML error page surfaces as a JSON syntax error.
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(typeof data.error === "string" ? data.error : "Sign in failed. Please try again.");

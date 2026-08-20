@@ -1,6 +1,4 @@
-// Clean stroke icons (one consistent set) — currentColor, sized via prop.
-// Only the icons the app actually renders live here; the console's mic and camera glyphs are
-// local to LiveStep because they carry an `off` variant nothing else needs.
+// Stroke icons, currentColor, sized via prop. Mic and camera live in LiveStep: they need an `off` variant.
 type P = { size?: number };
 const base = (size = 18) => ({
   width: size,

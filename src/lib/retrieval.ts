@@ -1,9 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { KNOWLEDGE, type Clause } from "./knowledge";
 
-// text-embedding-004 was retired on 2026-01-14 and now 404s. When it did, retrieval degraded
-// silently to keyword matching while the UI kept claiming the answers were semantically grounded
-// — so every embedding failure below is logged rather than swallowed.
+// Embedding failures are logged, never swallowed: silent fallback once faked semantic grounding.
 const EMBED_MODEL = "gemini-embedding-001";
 
 export type Hit = Clause & { score: number };
@@ -16,8 +14,7 @@ function getClient(): GoogleGenAI | null {
   return client;
 }
 
-// Asymmetric retrieval: the corpus and the query are embedded for different roles, and using the
-// default task type for both measurably degrades ranking.
+// Asymmetric retrieval: corpus and query need different task types, or ranking degrades.
 type TaskType = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
 
 async function embedBatch(texts: string[], taskType: TaskType): Promise<(number[] | null)[]> {
@@ -47,8 +44,7 @@ function embedKb() {
         KNOWLEDGE.map((c) => `${c.source}\n${c.text}`),
         "RETRIEVAL_DOCUMENT",
       );
-      // Keep whatever embedded successfully — one bad clause shouldn't drop the other nineteen
-      // back to keyword search.
+      // One bad clause shouldn't drop the rest back to keyword search.
       const ok = KNOWLEDGE.map((clause, i) => (vecs[i] ? { clause, vec: vecs[i]! } : null)).filter(
         (x): x is Embedded => x !== null,
       );
@@ -74,8 +70,7 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
 }
 
-// Common words survive a bare length filter and, since the query is a whole transcript chunk,
-// they otherwise dominate the overlap and make every question score alike.
+// Common words dominate the overlap and make every question score alike.
 const STOPWORDS = new Set(
   ("the and that this with you your for are but not any how have has had was were will would can could should" +
     " what when which who why does did done from they them their there here about into out off over under" +
@@ -92,9 +87,7 @@ function tokenize(s: string): string[] {
     .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 }
 
-// Keyword-overlap fallback used when embeddings are unavailable. Scores by how much of the QUERY
-// a clause covers, not how short the clause is — dividing by clause length just favours the
-// shortest clause and buries the long, specific one that actually answers the question.
+// Keyword fallback. Scores query coverage, not clause brevity, or short clauses always win.
 function lexical(query: string, k: number): Hit[] {
   const q = new Set(tokenize(query));
   if (!q.size) return [];
@@ -108,10 +101,7 @@ function lexical(query: string, k: number): Hit[] {
     .slice(0, k);
 }
 
-// Below this a "match" is just incidental similarity. Returning nothing is safer than handing the
-// rep a confident-looking page citation for a clause that doesn't answer the question.
-// Calibrated against this knowledge base: health-protection questions score 0.67-0.75, while
-// off-topic talk (small talk, car insurance) peaks at 0.63.
+// Below this a match is incidental. Health questions score 0.67-0.75, off-topic peaks at 0.63.
 const MIN_SCORE = { vector: 0.65, lexical: 0.06 };
 
 // Retrieve the top-k most relevant clauses for a query.
@@ -133,8 +123,7 @@ export async function retrieve(query: string, k = 3): Promise<Hit[]> {
         .slice(0, k)
         .filter((h) => h.score >= MIN_SCORE.vector);
     }
-    // Only this query failed (a rate limit, say). Keep the cached corpus — discarding it would
-    // re-embed every clause on the next request and amplify the very throttling that caused it.
+    // Keep the cached corpus: re-embedding every clause would amplify the throttling.
     return lexical(query, k).filter((h) => h.score >= MIN_SCORE.lexical);
   }
 

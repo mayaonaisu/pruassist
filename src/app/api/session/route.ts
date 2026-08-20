@@ -5,9 +5,7 @@ import { createSession, getByToken } from "@/lib/sessions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// The customer sees this name on their join link. REP_USERNAME is a login credential, not a
-// name — using it makes the customer's page read "a session with rep", so prefer the name the
-// representative typed as their consent signature.
+// The customer sees this name, so prefer the typed signature over the login credential.
 function repDisplayName(signature: unknown): string {
   const typed = typeof signature === "string" ? signature.trim() : "";
   if (typed.length > 1) return typed.slice(0, 60);

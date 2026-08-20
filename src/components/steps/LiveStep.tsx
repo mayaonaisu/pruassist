@@ -75,8 +75,7 @@ export default function LiveStep({
   );
 }
 
-/* The two faces, in one short row. Remote participants come first — the rep is looking at the
-   customer, not at themselves — and the rep's own tile carries the device controls. */
+/* The two faces in one row. Customer first; the rep's own tile carries the device controls. */
 function Faces({ media }: { media: ReturnType<typeof useLocalMedia> }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const local = tracks.find((t) => t.participant.isLocal);
@@ -105,8 +104,7 @@ function Faces({ media }: { media: ReturnType<typeof useLocalMedia> }) {
       <div className="cam me">
         {local ? <ParticipantTile trackRef={local} /> : <div className="cam-face">camera off</div>}
         <span className="cam-tag">YOU</span>
-        {/* A failed camera must not read as a camera the rep chose to turn off — that was the
-            whole point of surfacing device failures, so it gets its own label and colour. */}
+        {/* A failed camera must not read as one the rep chose to turn off. */}
         {isBroken(media.cam) && <span className="cam-bad">{CAM_LABEL[media.cam].text.toUpperCase()}</span>}
         <span className="cam-ctl">
           <button
@@ -218,9 +216,7 @@ function LiveConsole({
   const media = useLocalMedia(room);
   const micEnabled = media.mic === "on";
 
-  // Transcribe the rep's own speech only while their mic is live. Muting the mic must also pause
-  // transcription — otherwise "Mute" silences the customer's audio but the transcript (and the AI)
-  // keep capturing the rep's words.
+  // Muting must pause transcription too, or "Mute" keeps feeding the rep's words to the AI.
   const speech = useBrowserSpeech(micEnabled, ({ final, interim: itm }) => {
     if (final) addFinal(repName, final);
     if (itm) setSpeakerInterim(repName, itm);
@@ -272,9 +268,7 @@ function LiveConsole({
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight });
   }, [lines, interim]);
 
-  // `rephrase` re-runs the same question to get different wording. It replaces the current
-  // pointers rather than adding new ones, so it must not count again — otherwise a rep who
-  // rewords one question three times books it as three confusion flags in the session stats.
+  // `rephrase` replaces the current pointers, so it must not re-count them as new flags.
   const runSuggest = useCallback(async ({ rephrase = false }: { rephrase?: boolean } = {}) => {
     if (inFlightRef.current) return;
     const transcript = linesRef.current.slice(-12).map((l) => `${l.speaker}: ${l.text}`).join("\n");
@@ -308,8 +302,7 @@ function LiveConsole({
         setUsed(new Set());
         setOpenKey(null);
         if (!rephrase) {
-          // One pointer = one line offered. Counting the six fields separately made the brief
-          // read "surfaced 24, used 3", because only the line itself can be marked as said.
+          // One pointer = one line offered; counting all six fields made the brief read "24 / 3".
           if (r.suggestedLine) statsRef.current.surfaced += 1;
           if (r.concern) statsRef.current.flags += 1;
         }
@@ -356,8 +349,7 @@ function LiveConsole({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // The confusion timeline is derived from the flags already on the transcript — it never
-  // invents a signal the transcript doesn't carry.
+  // Derived from flags already on the transcript, never a signal the transcript lacks.
   const { bars, flagCount } = useMemo(() => {
     const out = new Array(BUCKETS).fill(0) as number[];
     let flags = 0;
@@ -372,8 +364,7 @@ function LiveConsole({
   // While the rep is muted, drop their half-captured phrase so no stale "live" text lingers.
   const visibleInterim = micEnabled ? interim : { ...interim, [repName]: "" };
 
-  // The camera can fail the same two ways the mic can, and the rep needs telling either way —
-  // the tile badge is easy to miss while they're looking at the customer.
+  // The tile badge is easy to miss mid-call, so a camera failure also gets a notice.
   const camAlert = isBroken(media.cam) ? `${CAM_LABEL[media.cam].hint} The call and your audio are unaffected.` : null;
 
   const micAlert =
@@ -387,7 +378,7 @@ function LiveConsole({
             ? "Speech recognition was blocked by the browser, so your side of the conversation won’t be transcribed. Allow microphone access and reload."
             : null;
 
-  // Supporting material — everything that is not the line itself, collapsed to one row each.
+  // Everything that is not the line itself, collapsed to one row each.
   const support = result
     ? ([
         { key: "firstStep", label: "Do first", text: result.firstStep },
@@ -457,7 +448,7 @@ function LiveConsole({
         </div>
       </div>
 
-      {/* THE LINE — the one thing the rep reads while looking at a customer. */}
+      {/* THE LINE — the one thing the rep reads mid-conversation. */}
       <div className="line-block">
         {loading && !result ? (
           <>

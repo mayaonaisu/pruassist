@@ -13,8 +13,7 @@ const FOCUS = [
 ];
 const PRODUCT_AREA = "Health Protection";
 
-// Reads the selection back as speech rather than a list, because the sentence above is the
-// thing the rep is about to say out loud.
+// Reads the selection back as speech, since the sentence above is what the rep will say.
 function asPhrase(items: string[]): string {
   if (items.length === 0) return "whatever comes up";
   if (items.length === 1) return items[0];
@@ -48,8 +47,7 @@ export default function ConsentStep({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ productArea: PRODUCT_AREA, focus, repName: signature.trim() }),
       });
-      // The rep sign-in expires after 8 hours but /rep is only gated on page load, so a console
-      // left open overnight fails here — send them to sign in again instead of showing a dead end.
+      // /rep is gated on page load only, so an 8-hour-old console fails here rather than earlier.
       if (res.status === 401) {
         window.location.href = "/login";
         return;
@@ -75,8 +73,7 @@ export default function ConsentStep({
         Both parties consent on their own device. Nothing is captured until the customer accepts on theirs.
       </div>
 
-      {/* The configuration reads as a sentence the rep would actually say, so the setup and the
-          spoken framing of the meeting are the same object. */}
+      {/* The configuration reads as a sentence the rep would actually say. */}
       <p className="sentence">
         Today&rsquo;s session covers <span className="slot">{PRODUCT_AREA}</span>, focusing on{" "}
         <span className="slot multi">{asPhrase(focus)}</span>.

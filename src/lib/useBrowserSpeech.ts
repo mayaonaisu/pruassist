@@ -13,10 +13,7 @@ const isSupported = () =>
   typeof window !== "undefined" &&
   !!((window as WindowWithSpeech).SpeechRecognition || (window as WindowWithSpeech).webkitSpeechRecognition);
 
-// Live speech-to-text using the browser's built-in Web Speech API (Chrome/Edge).
-// Transcribes the LOCAL microphone only — each participant transcribes themselves.
-// `onResult` is held in a ref so updating it does not restart recognition.
-// Returns the current status so callers can tell "quiet" apart from "the mic was blocked".
+// Live speech-to-text on the LOCAL microphone via the browser's Web Speech API.
 export function useBrowserSpeech(
   enabled: boolean,
   onResult: (r: SpeechResult) => void,
@@ -67,9 +64,7 @@ export function useBrowserSpeech(
       setStatus(e.error === "not-allowed" || e.error === "service-not-allowed" ? "denied" : "error");
     };
 
-    // The API auto-stops on silence, so restart to keep it continuous. Back off between
-    // attempts — a persistent failure fires error→end→start→error, which without a delay
-    // is a tight loop that pegs the CPU for the whole call.
+    // The API auto-stops on silence; back off or a persistent failure becomes a tight loop.
     rec.onend = () => {
       if (stopped) return;
       const delay = Math.min(250 * 2 ** attempt, 5000);

@@ -1,12 +1,6 @@
 import { Redis } from "@upstash/redis";
 
-// A tiny key/value seam with a TTL, so the session and consent registries don't care whether
-// they're backed by process memory or Redis.
-//
-// This exists because the app is deployed on serverless functions: each API route can run on a
-// different instance, and a plain module-level Map is NOT shared between them. The rep would
-// create a session on one instance and the customer's join link would hit another, so links
-// would fail intermittently rather than outright.
+// Key/value seam with a TTL: serverless instances share no memory, so a Map would break join links.
 export interface Store {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T, ttlSeconds?: number): Promise<void>;
@@ -17,9 +11,7 @@ export const DEFAULT_TTL = 60 * 60 * 24;
 
 type Entry = { value: unknown; expiresAt: number };
 
-// Hung off globalThis rather than a module-level const: in dev, a hot reload re-evaluates the
-// module and a plain `new Map()` would silently start over, which shows up as a live session
-// suddenly reporting "No active session for this room".
+// On globalThis, not a module const: a dev hot reload would silently reset a live session.
 const memory: Map<string, Entry> =
   ((globalThis as { __pruStore?: Map<string, Entry> }).__pruStore ??= new Map());
 
@@ -60,8 +52,7 @@ function redisFromEnv(): Redis | null {
 
 let store: Store | null = null;
 
-// Redis when it's configured, process memory otherwise — so `npm run dev` needs no setup, while
-// a deployed instance shares state across every serverless invocation.
+// Redis when configured, process memory otherwise.
 export function getStore(): Store {
   if (!store) {
     const redis = redisFromEnv();

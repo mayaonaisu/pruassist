@@ -1,7 +1,6 @@
 import { knowledgeIndex } from "@/lib/knowledge";
 
-// One rendering of "what the retriever can actually cite", shared by the readiness screen and
-// the consent screen — they showed the same rows with only the heading differing.
+// Shared by the readiness and consent screens, which rendered identical rows.
 export default function DocumentsInScope({ title }: { title: string }) {
   return (
     <div className="srcs">

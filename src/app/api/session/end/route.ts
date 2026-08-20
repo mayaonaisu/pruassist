@@ -6,10 +6,7 @@ import { endSession } from "@/lib/sessions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Rep ends a session (auth required). Two things happen:
-//   1. the session is marked inactive, so the join link stops working, and
-//   2. the LiveKit room is deleted, which disconnects EVERYONE still in the call
-//      — including the customer — so ending on the rep side ends it for them too.
+// Rep ends a session: the join link stops working and the room is deleted, dropping everyone.
 export async function POST(req: NextRequest) {
   if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 

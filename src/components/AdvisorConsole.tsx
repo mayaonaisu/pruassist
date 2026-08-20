@@ -50,9 +50,7 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ transcript: transcriptText }),
         });
-        // Never trust the shape here: the summary screen maps over these arrays, so an error
-        // envelope from a proxy or a timed-out route would white-screen the console and lose
-        // the whole session right after the rep hangs up.
+        // The summary screen maps over these arrays, so a bad shape would white-screen the console.
         if (res.ok) data = toSummary(await res.json());
       } catch {
         /* keep empty summary */

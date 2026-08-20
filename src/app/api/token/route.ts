@@ -6,11 +6,7 @@ import { getByToken, getByRoom } from "@/lib/sessions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Issues a LiveKit token ONLY to:
-//   (a) the authenticated rep, for one of their active session rooms, or
-//   (b) a customer presenting a valid session join-token (the private link).
-// Anyone without the link or a rep login cannot obtain a token, so the room
-// is effectively private to the two intended participants.
+// LiveKit tokens go only to the authenticated rep or a valid join link, keeping the room private.
 export async function GET(req: NextRequest) {
   const username = req.nextUrl.searchParams.get("username");
   const joinToken = req.nextUrl.searchParams.get("token");

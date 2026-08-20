@@ -9,7 +9,7 @@ const MODEL = "gemini-2.5-flash";
 
 // Summarises the advisory conversation into a post-session brief for the rep.
 export async function POST(req: NextRequest) {
-  // Rep-only: this route spends billed Gemini calls, and the demo is served over a public tunnel.
+  // Rep-only: this route spends billed Gemini calls.
   if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
   const apiKey = process.env.GEMINI_API_KEY;

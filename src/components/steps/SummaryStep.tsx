@@ -16,8 +16,7 @@ export default function SummaryStep({
   const s = summary.stats;
 
   const startNew = () => {
-    // The typed notes live only in this component and feed only the export, so leaving
-    // without them is unrecoverable.
+    // These notes exist only here and feed only the export, so leaving loses them for good.
     if (notes.trim() && !window.confirm("Your typed notes haven’t been exported and will be lost. Start a new session anyway?")) return;
     onNewSession();
   };
@@ -45,8 +44,7 @@ export default function SummaryStep({
     const a = document.createElement("a");
     a.href = url;
     a.download = "pruassist-advisor-brief.txt";
-    // The anchor must be in the document for a programmatic click to download in Firefox, and
-    // the object URL must outlive the click — revoking in the same tick aborts the download.
+    // pls dont touch firefox needs the anchor in the document, and revoking in the same tick aborts the download.
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -67,8 +65,7 @@ export default function SummaryStep({
         </div>
       </div>
 
-      {/* The numbers sit inside a sentence rather than in metric cards, because this is the
-          form the rep repeats to a supervisor. */}
+      {/* Numbers sit in a sentence, the form the rep repeats to a supervisor. */}
       <p className="stat-sentence">
         Over <b>{summary.durationMin}</b> minutes PRUAssist flagged <b>{s.flags}</b>{" "}
         {s.flags === 1 ? "moment" : "moments"} of confusion and surfaced <b>{s.surfaced}</b>{" "}

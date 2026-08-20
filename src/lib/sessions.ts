@@ -1,11 +1,7 @@
 import { randomBytes } from "crypto";
 import { getStore } from "./store";
 
-// Advisory session registry.
-//
-// Backed by the shared Store rather than a Map, so the rep's serverless instance and the
-// customer's can see the same session (see store.ts). The room record is the single source of
-// truth; the join token is a pointer to it, so ending a session can't leave the two disagreeing.
+// Advisory session registry. The room record is the source of truth; the join token points at it.
 
 export type SessionContext = { productArea: string; focus: string[] };
 export type Session = {

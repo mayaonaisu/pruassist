@@ -1,16 +1,5 @@
-/* ===================================================================
-   PRUAssist — "Brochure & Prompter"
-   One warm paper world. The interface is a marked-up policy brochure:
-   newsprint paper, ballpoint ink, pencil annotations, a highlighter for
-   the moment a customer loses the thread, and a green stamp for consent.
-
-   Typography is a strict contract — font tells you what a thing IS:
-     --font-spoken (Newsreader) the human voice — the line to say, the customer's own
-                                words, and a signed name. Never machine chrome.
-     --font-mono  (Geist Mono)  citations, timestamps, measured values.
-     --font-serif (Fraunces)    document titles.
-     --font-sans  (Inter)       interface furniture.
-   =================================================================== */
+/* PRUAssist — "Brochure & Prompter". Font signals meaning: Newsreader = spoken words,
+   Geist Mono = citations, Fraunces = document titles, Inter = interface. */
 
 :root {
   /* ---- surfaces: brochure paper ---- */
@@ -19,7 +8,7 @@
   --brochure-3: #eae2d4;
   --card: #fffdf9;
 
-  /* ---- ink: four levels, every one ≥4.5:1 on every surface it sits on ---- */
+  /* ---- ink: four levels, all ≥4.5:1 on every surface ---- */
   --ink: #171a21;
   --ink-2: #3e4450;
   --ink-3: #555c6a;
@@ -35,22 +24,22 @@
   --pru-tint: rgba(200, 16, 46, 0.06);
   --pru-line: rgba(200, 16, 46, 0.28);
 
-  /* ---- the highlighter: confusion, and only confusion ---- */
+  /* ---- the highlighter: confusion only ---- */
   --marker: #e8b317;
   --marker-wash: rgba(242, 194, 48, 0.32);
   --marker-ink: #7a5c05;
 
-  /* ---- the stamp: consent granted, and only that ---- */
+  /* ---- the stamp: consent granted only ---- */
   --stamp: #2c6a4e;
   --stamp-wash: rgba(44, 106, 78, 0.11);
 
-  /* ---- the lens: video is dark because video is dark ---- */
+  /* ---- the lens: video surfaces ---- */
   --lens: #232833;
   --lens-2: #2e3542;
 
   --shadow-card: 0 1px 2px rgba(23, 26, 33, 0.05), 0 14px 34px -12px rgba(23, 26, 33, 0.13);
 
-  /* Paper has tight corners; big radii read as consumer app, not advisory document. */
+  /* Paper has tight corners; big radii read as consumer app. */
   --r-xs: 4px;
   --r-sm: 6px;
   --r-md: 10px;
@@ -59,8 +48,7 @@
   --font-sans: var(--font-inter), -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-geist-mono), "SFMono-Regular", ui-monospace, monospace;
   --font-serif: var(--font-fraunces), Georgia, "Times New Roman", serif;
-  /* Aliased to a NEW name: `--font-read` is injected on <html> by next/font, and :root IS
-     <html>, so redefining it here would overwrite the real value with a cycle. */
+  /* Aliased: next/font injects --font-read on <html>, and :root IS <html>, so reusing it cycles. */
   --font-spoken: var(--font-read), Georgia, "Times New Roman", serif;
 }
 
@@ -75,8 +63,7 @@ html {
   color-scheme: light;
   scroll-behavior: smooth;
 }
-/* overflow-x here would make `body` a scroll container (overflow-y computes to auto), and a
-   sticky header inside a scrollport that never scrolls just scrolls away with the page. */
+/* overflow-x here would make body a scroll container and break the sticky header. */
 body {
   max-width: 100vw;
   min-height: 100dvh;
@@ -98,8 +85,8 @@ button {
   background: var(--marker-wash);
   color: var(--ink);
 }
-/* Must be `outline`, not `box-shadow`: buttons and chips set their own box-shadow in later
-   rules at equal specificity, which silently overwrote the focus ring on every control. */
+/* DONT CHANGE TS */
+/* Must be outline, not box-shadow: buttons set their own shadow and would overwrite the ring. */
 :focus-visible {
   outline: 2px solid var(--pru);
   outline-offset: 2px;
@@ -185,10 +172,7 @@ button {
   background: var(--stamp);
 }
 
-/* ============ layout ============ */
-/* Short steps (readiness, brief) sit centred instead of clinging to the top with a void
-   beneath. `margin-block: auto` on the child rather than `justify-content: center`, because
-   the latter clips the top of any step taller than the viewport. */
+/* ============ layout — short steps centre via margin-block; justify-content clips tall content ============ */
 .pru-main {
   min-height: calc(100dvh - 58px);
   display: flex;
@@ -334,7 +318,7 @@ button {
   border-color: var(--pru-line);
 }
 
-/* signature line — the typed name, on a rule, like a form */
+/* signature line — a typed name on a rule */
 .sigline {
   width: 100%;
   font-family: var(--font-spoken);
@@ -375,16 +359,14 @@ button {
   color: var(--marker-ink);
 }
 
-/* the highlighter — used for one thing: where the customer lost the thread */
+/* the highlighter — only ever where the customer lost the thread */
 .mark {
   background: var(--marker-wash);
   border-radius: 2px;
   padding: 0 2px;
 }
 
-/* ============ live console ============
-   Sized to the viewport rather than a fixed floor: a hard min-height taller than a laptop
-   screen pushes the pointers below the fold for the whole call. */
+/* ============ live console — sized to the viewport; a fixed floor hides the pointers ============ */
 .pru-live {
   display: flex;
   flex-direction: column;
@@ -448,15 +430,14 @@ button {
   background: var(--pru-tint);
 }
 
-/* the two faces, in one short row — the freed width carries the timeline */
+/* the two faces in one short row; the freed width carries the timeline */
 .c-top {
   display: flex;
   gap: 11px;
   flex: none;
   flex-wrap: wrap;
 }
-/* Faces wraps its tiles, so the row lives here — not on .c-top, which only sees two children.
-   Flex rather than a fixed column count so a third participant just joins the row. */
+/* The row lives here, not on .c-top, which sees only two children. Flex absorbs a third face. */
 .cams {
   display: flex;
   gap: 11px;
@@ -541,7 +522,7 @@ button {
 .cam-ctl button.off {
   background: var(--pru);
 }
-/* Distinct from .off: the rep chose "off", but "bad" is a failure they need to act on. */
+/* Distinct from .off: "off" was chosen, "bad" is a failure to act on. */
 .cam-ctl button.bad {
   background: var(--marker);
   color: #3a2c02;
@@ -673,7 +654,7 @@ button {
 .say .q {
   color: var(--pencil);
 }
-/* the receipt, hanging in the margin — grounded-in-policy as a layout property */
+/* the receipt, hanging in the margin */
 .cite {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -817,7 +798,7 @@ button {
   flex: none;
 }
 
-/* transcript — a live feed, so it sits at the bottom and older lines scroll off the top */
+/* transcript — a live feed: newest pinned to the bottom */
 .tr-body {
   display: flex;
   flex-direction: column;
@@ -894,7 +875,7 @@ button {
   line-height: 1.6;
   max-width: 46ch;
 }
-/* the landing shows the product's actual moment, built from the console's own parts */
+/* built from the console's own parts */
 .moment {
   background: var(--card);
   border: 1px solid var(--rule);
@@ -996,8 +977,7 @@ button {
   color: var(--ink-3);
 }
 
-/* ============ consent ============ */
-/* the configuration reads as a sentence the rep would actually say */
+/* ============ consent — the configuration reads as a sentence ============ */
 .sentence {
   font-family: var(--font-spoken);
   font-size: clamp(21px, 1.65vw, 29px);
@@ -1120,7 +1100,7 @@ button {
   color: var(--pencil);
   line-height: 1.8;
 }
-/* stats set inside a sentence — the form the rep repeats to a supervisor */
+/* stats set inside a sentence */
 .stat-sentence {
   font-family: var(--font-spoken);
   font-size: clamp(19px, 1.45vw, 26px);
@@ -1250,7 +1230,7 @@ button {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
-  /* Without this, staggered entrances keep their delay and hold `opacity: 0`. */
+  /* Without this, staggered entrances hold opacity: 0. */
   .pru-enter {
     animation: none;
     opacity: 1;
@@ -1280,8 +1260,7 @@ button {
   .pru-grid-3 {
     grid-template-columns: 1fr;
   }
-  /* The console stops being a single-screen layout on small viewports — it scrolls instead,
-     because squeezing two faces plus the line into a phone would shrink both past use. */
+  /* Below this the console scrolls: two faces plus the line on a phone shrinks both past use. */
   .pru-live {
     height: auto;
     min-height: 0;
@@ -1309,8 +1288,8 @@ button {
   }
 }
 @media (max-width: 860px) {
-  /* Row 1 keeps the logo and the tag; the step strip drops to its own row so it can never
-     push anything off-screen (overflow-x is hidden, so off-screen means unreachable). */
+  /* DO NOT TOUCH */
+  /* The step strip drops to its own row; overflow-x is hidden, so off-screen is unreachable. */
   .pru-header {
     padding: 12px 16px;
     gap: 10px 14px;

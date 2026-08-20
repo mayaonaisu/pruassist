@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { IconArrow, IconCheck, IconLock } from "@/components/icons";
 
-// The three promises, stated as facts — including what does NOT happen, which is the one
-// most likely to be doubted.
+// Three promises stated as facts, including what does NOT happen.
 const SAFE = [
   {
     title: "Consent before capture",
@@ -31,8 +30,7 @@ export default function Home() {
         </Link>
       </header>
 
-      {/* The hero shows the product's actual moment rather than describing it — the same
-          parts the live console uses, so this is a preview and not an illustration. */}
+      {/* Built from the console's own parts, so the hero previews the product rather than illustrating it. */}
       <section className="hero">
         <div>
           <div className="pru-eyebrow" style={{ marginBottom: 14 }}>

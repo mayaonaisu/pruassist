@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 const MODEL = "gemini-2.5-flash";
 
 export async function POST(req: NextRequest) {
-  // Rep-only: this route spends billed Gemini calls, and the demo is served over a public tunnel.
+  // Rep-only: this route spends billed Gemini calls.
   if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
   const apiKey = process.env.GEMINI_API_KEY;
@@ -26,8 +26,7 @@ export async function POST(req: NextRequest) {
   // 1) RETRIEVE the most relevant Prudential clauses for what was just said.
   const hits = await retrieve(transcript, 3);
   if (!hits.length) {
-    // Answering with no clause would produce an ungrounded pointer carrying a fabricated-looking
-    // source line — say nothing instead.
+    // No clause means no grounded citation, so say nothing rather than invent one.
     return NextResponse.json({ note: "No policy clause covers this yet — keep listening, or ask the customer to be more specific." });
   }
   const context = hits.map((h, i) => `[${i + 1}] (${h.source})\n${h.text}`).join("\n\n");

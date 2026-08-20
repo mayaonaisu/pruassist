@@ -133,8 +133,7 @@ export default function CustomerPage() {
           <div className="pru-eyebrow" style={{ marginBottom: 10 }}>Private link · PRUAssist</div>
           <h1 className="doc-title">{info.repName} has invited you to an advisory session</h1>
           <div className="doc-sub" style={{ marginBottom: 0 }}>{info.productArea}</div>
-          {/* Three plain facts, including what does NOT happen — the point most likely to be
-              doubted, and the one a customer deserves stated outright. */}
+          {/* Three plain facts, including what does NOT happen. */}
           <div className="cust-card">
             <ul>
               <li>
@@ -227,8 +226,7 @@ function CustomerStage({ name }: { name: string }) {
     room?.disconnect().catch(() => {});
   };
 
-  // The control bar sits on paper, so an "on" control is dark-on-light. It previously carried
-  // white text on a 10%-white fill left over from the dark bar, which made a live mic invisible.
+  // The bar sits on paper, so an "on" control is dark-on-light. White-on-white hid a live mic.
   const pill: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
@@ -249,8 +247,7 @@ function CustomerStage({ name }: { name: string }) {
     border: "1px solid var(--rule-strong)",
     color: "var(--ink-2)",
   };
-  // "Off" is the state the customer must be able to spot instantly — it means they are not
-  // being heard or seen, so it reads as the one loud thing on the bar.
+  // "Off" means not heard or seen, so it is the one loud thing on the bar.
   const off: React.CSSProperties = {
     ...pill,
     background: "var(--pru)",

@@ -6,8 +6,7 @@ import { getStore } from "@/lib/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Consent log. Shares the Store with the session registry so the customer's consent (recorded on
-// their device) is visible to the rep's console, which may be served by a different instance.
+// Consent log. Shares the Store so the customer's consent is visible to the rep's instance.
 type ConsentRecord = { room: string; name: string; consentedAt: string };
 
 const consentKey = (roomId: string) => `consent:${roomId}`;
