@@ -171,7 +171,7 @@ model calls for a whole session. When that ceiling is reached the deterministic 
 because they cost nothing.
 
 Against the quota itself there are two defences. **Keys rotate**: set `GEMINI_API_KEY_2` (and up to
-`_8`) from other projects and a rate-limited key is swapped out mid-call, instantly, with no wait —
+`_16`) from other projects and a rate-limited key is swapped out mid-call, instantly, with no wait —
 [`src/lib/genai.ts`](src/lib/genai.ts) holds the pool and both the agent and retrieval draw from it.
 Only when every key is cooling does a call wait, and only for as long as the API actually asked for.
 **And `PRUASSIST_MODEL` swaps the model** without a code change; the thinking configuration adapts to

@@ -7,11 +7,11 @@ import { GoogleGenAI } from "@google/genai";
 // rotation is worth having precisely at the moment it matters — mid-demo, when there is no time to
 // change an environment variable and redeploy.
 //
-// Keys are read from GEMINI_API_KEY plus GEMINI_API_KEY_2 … _8. They must all serve the same
+// Keys are read from GEMINI_API_KEY plus GEMINI_API_KEY_2 … _16. They must all serve the same
 // model: a key issued to a new project cannot reach gemini-2.5-flash, which is why MODEL defaults
 // to a model every key can use.
 
-const MAX_KEYS = 8;
+const MAX_KEYS = 16;
 
 type Pooled = { client: GoogleGenAI; coolUntil: number };
 
