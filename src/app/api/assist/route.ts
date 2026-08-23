@@ -1,42 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentRep } from "@/lib/auth";
-import { retrieve } from "@/lib/retrieval";
 import { getByRoom } from "@/lib/sessions";
-import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "@/lib/agent/gemini";
-import { haveKey } from "@/lib/genai";
 import { loadState } from "@/lib/agent/ledger";
 import { matchesLookahead } from "@/lib/agent/cache";
-import { activeDecision, readinessFor } from "@/lib/agent/readiness";
-import { looksComparative } from "@/lib/decisions";
-import { clauseBlock, comparisonSystemInstruction, pointerSystemInstruction } from "@/lib/agent/prompts";
-import { unsupportedFigures } from "@/lib/agent/verify";
+import { runOrchestrator } from "@/lib/agent/orchestrator/graph";
+import { emptyState } from "@/lib/agent/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// This is the fast path and stays that way. Comprehension tracking lives behind /api/agent/state,
-// which schedules its own work after the response is flushed.
+// The live path, and the front door of the orchestrator. The cache short-circuit stays first (a
+// prepared answer costs no model call); on a miss the LangGraph orchestrator decides the mode and
+// routes. Comprehension tracking still lives behind /api/agent/state, untouched.
 
 export async function POST(req: NextRequest) {
-  // Rep-only: this route spends billed Gemini calls.
+  // Rep-only: this route can spend billed model calls.
   if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
-  if (!haveKey()) {
-    return NextResponse.json({ note: "Add GEMINI_API_KEY to .env.local to enable AI pointers." });
-  }
-
   const body = await req.json().catch(() => ({}));
-  const { transcript, roomId, asked } = body ?? {};
+  const { transcript, roomId, asked, clarifyContext } = body ?? {};
   if (!transcript || typeof transcript !== "string") {
     return NextResponse.json({ error: "Missing 'transcript'." }, { status: 400 });
   }
 
-  // roomId is optional on purpose: a tab left open from an earlier session must not start
-  // failing mid-demo. Without it there is no product area and no prepared answer.
+  // roomId is optional on purpose: a tab left open from an earlier session must not start failing
+  // mid-demo. Without it there is no product area and no prepared answer.
   const session = typeof roomId === "string" && roomId ? await getByRoom(roomId) : null;
   const productArea = session?.context.productArea;
-
-  // The ledger, loaded once: the cache gate reads it, and so does the comparison instruction.
   const state = session ? await loadState(roomId, session.context.productArea) : null;
 
   // 0) CACHE — did the background pass already prepare, and verify, the answer to this question?
@@ -46,6 +36,7 @@ export async function POST(req: NextRequest) {
     if (check.hit && state.lookahead) {
       const l = state.lookahead;
       return NextResponse.json({
+        mode: "policy_guidance",
         ...l.pointers,
         sources: l.sources,
         // Surfaced rather than hidden: an answer written before the question was asked is a claim
@@ -58,72 +49,37 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 1) RETRIEVE the most relevant Prudential clauses for what was just said.
-  const hits = await retrieve(transcript, 3, productArea);
-  if (!hits.length) {
-    // No clause means no grounded citation, so say nothing rather than invent one.
-    return NextResponse.json({ note: "No policy clause covers this yet — keep listening, or ask the customer to be more specific." });
+  // 1) ORCHESTRATE — the brain (or the deterministic fallback) decides the mode; LangGraph routes
+  // to the matching handler. The safety spine (readiness) is not here — it rides the state poll.
+  const scope = productArea ?? "Health Protection";
+  const orchState = state ?? emptyState(typeof roomId === "string" && roomId ? roomId : "anon", scope);
+  const result = await runOrchestrator({
+    asked: typeof asked === "string" ? asked : "",
+    transcript,
+    state: orchState,
+    scope,
+    clarifyContext: typeof clarifyContext === "string" && clarifyContext.trim() ? clarifyContext : undefined,
+  });
+
+  // 2) MAP the mode result onto the response the console renders.
+  if (result.mode === "keep_listening") {
+    return NextResponse.json({ mode: result.mode, note: null });
   }
-
-  // A comparison is a different job from an explanation: it has to say what is not yet settled.
-  const decision = state ? activeDecision(state) : null;
-  const comparing =
-    decision && state && typeof asked === "string" && asked.trim() ? looksComparative(asked, decision) : false;
-  const instruction =
-    comparing && decision && state
-      ? comparisonSystemInstruction(decision, readinessFor(decision, state), productArea)
-      : pointerSystemInstruction(productArea);
-
-  // 2) GENERATE a structured set of private pointers, grounded in those clauses.
-  // allowSleep is off: a rate limit rotates to another key if one is free, but the rep is waiting,
-  // so it never blocks on a cooldown — it degrades to a note instead.
-  const response = await callWithRetry(
-    "assist",
-    (ai) =>
-      ai.models.generateContent({
-        model: MODEL,
-        contents: `POLICY CLAUSES:\n${clauseBlock(hits)}\n\nRECENT TRANSCRIPT:\n${transcript}`,
-        config: {
-          systemInstruction: instruction,
-          responseMimeType: "application/json",
-          thinkingConfig: thinking("off"),
-          temperature: 0.3,
-          maxOutputTokens: JSON_BUDGET,
-        },
-      }),
-    { allowSleep: false },
-  );
-
-  if (!response) {
-    return NextResponse.json({ note: "The AI service is rate limited right now — try again in a moment." });
+  if (result.mode === "topic_drift") {
+    return NextResponse.json({ mode: result.mode, note: result.drift?.message, drift: result.drift });
   }
-
-  let p: Record<string, unknown> = {};
-  try {
-    p = JSON.parse((response.text ?? "").trim());
-  } catch {
-    p = { explainer: (response.text ?? "").trim() };
+  if (result.mode === "clarification") {
+    return NextResponse.json({ mode: result.mode, clarify: result.clarify });
   }
-  const str = (v: unknown) => (typeof v === "string" ? v : "");
-  const pointers = {
-    concern: str(p.concern),
-    firstStep: str(p.firstStep),
-    suggestedLine: str(p.suggestedLine),
-    explainer: str(p.explainer),
-    comparison: str(p.comparison),
-    followUp: str(p.followUp),
-  };
-
-  // 3) VERIFY, deterministically. There is no time for a second model call here, so the check
-  // targets the failure that matters most: a figure the model invented, shown next to a real
-  // brochure page number. It labels rather than blocks — the rep decides what to say.
-  const spoken = [pointers.suggestedLine, pointers.explainer, pointers.comparison].filter(Boolean).join("\n");
-
+  if (result.note && !result.pointers) {
+    return NextResponse.json({ mode: result.mode, note: result.note });
+  }
   return NextResponse.json({
-    ...pointers,
-    sources: hits.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) })),
+    mode: result.mode,
+    ...(result.pointers ?? {}),
+    sources: result.sources ?? [],
     cached: false,
-    comparing,
-    unsupportedFigures: unsupportedFigures(spoken, hits),
+    comparing: result.comparing ?? false,
+    unsupportedFigures: result.unsupportedFigures ?? [],
   });
 }

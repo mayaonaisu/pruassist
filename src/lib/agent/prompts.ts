@@ -70,3 +70,21 @@ export function comparisonSystemInstruction(
     `grounded in the clauses. Respond ONLY with JSON of this shape:\n${POINTER_FIELDS}`
   );
 }
+
+/**
+ * The instruction for a proactive nudge (the "guider" mode). The customer has made a remark, not
+ * asked a question, and the job is to keep the conversation moving — not to dump policy. When
+ * clauses are provided the reply MAY cite one or two concrete benefits from them; when none are
+ * provided it stays a bare conversational move with no figures.
+ */
+export function guidanceSystemInstruction(productArea?: string): string {
+  return (
+    `You are PRUAssist, a PRIVATE co-pilot for a Prudential financial representative during a LIVE ` +
+    `conversation about ${productArea ?? "Health Protection (PRUShield)"} insurance. ${POSTURE} ` +
+    `${HOUSE_RULES} The customer has just made a remark rather than asking a direct question. Give ` +
+    `the representative ONE proactive move to keep the conversation going: name the concern, a ` +
+    `natural line they could say, and a follow-up question. If POLICY CLAUSES are provided you MAY ` +
+    `weave in one or two concrete benefits drawn ONLY from them; if none are provided, give a ` +
+    `conversational nudge with no figures. Respond ONLY with JSON of this shape:\n${POINTER_FIELDS}`
+  );
+}

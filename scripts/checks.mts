@@ -32,6 +32,8 @@ const { emptyState } = await import("../src/lib/agent/types.ts");
 const { lastFromCustomer, newestAt, toTurns, windowToSend } = await import("../src/lib/transcript.ts");
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
+const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
+const { runOrchestrator } = await import("../src/lib/agent/orchestrator/graph.ts");
 
 type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
@@ -445,6 +447,44 @@ test("the active decision is the one the conversation is actually about", () => 
   assert.equal(activeDecision(emptyState("r", AREA)), null);
   assert.equal(activeDecision(ledgerWith([["pro-ration", "asserted"]]))?.id, "which-tier");
   assert.equal(activeDecision(ledgerWith([["stop-loss", "asserted"], ["panel-providers", "misunderstood"]]))?.id, "add-pruextra");
+});
+
+/* ---------- the orchestrator router (deterministic tier) ---------- */
+
+// decideMode is the deterministic fallback AND the offline oracle. It is trusted on the core three
+// modes; guider / clarification / topic_drift are LLM-brain modes, so the fallback leaves a bare
+// statement at keep_listening rather than risk a wrong interjection when the model is unavailable.
+function routerInput(asked: string, state = emptyState("r", AREA)) {
+  return { asked, transcript: asked, state, scope: AREA };
+}
+
+test("router: a bare assent keeps listening", () => {
+  assert.equal(decideMode(routerInput("Okay, thanks.")).mode, "keep_listening");
+  assert.equal(decideMode(routerInput("Right, okay.")).mode, "keep_listening");
+});
+
+test("router: a comparative question about the active decision routes to comparison", () => {
+  // pro-ration + deductible-amounts are which-tier differentiators, so which-tier is the active decision.
+  const s = ledgerWith([["pro-ration", "asserted"], ["deductible-amounts", "asserted"]]);
+  assert.equal(decideMode(routerInput("So which plan would be better for me, Premier or Plus?", s)).mode, "comparison");
+});
+
+test("router: an in-scope question routes to policy guidance", () => {
+  assert.equal(decideMode(routerInput("Why do I need PRUExtra?")).mode, "policy_guidance");
+  assert.equal(decideMode(routerInput("How much is the deductible?")).mode, "policy_guidance");
+});
+
+test("router: the deterministic tier leaves a bare statement at keep_listening", () => {
+  // guider is an LLM-brain mode; with the brain down the safe fallback is silence, not a guess.
+  assert.equal(decideMode(routerInput("I really like PRUShield.")).mode, "keep_listening");
+});
+
+test("the LangGraph orchestrator compiles and the wake-gate short-circuits an ack", async () => {
+  // Hermetic: a bare assent is caught by the wake-gate before any brain call or retrieval, so this
+  // proves the graph builds and invokes without touching the network.
+  const r = await runOrchestrator({ asked: "Okay, thanks.", transcript: "Customer: Okay, thanks.", state: emptyState("r", AREA), scope: AREA });
+  assert.equal(r.mode, "keep_listening");
+  assert.ok(!r.pointers);
 });
 
 /* ---------- the scoring pass ---------- */
