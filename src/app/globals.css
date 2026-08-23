@@ -641,6 +641,31 @@ button {
   font-size: 11px;
 }
 
+/* orchestrator modes — the topic-drift warning and the clarification prompt in the line-block */
+.line-block .drift .cat {
+  color: var(--marker-ink);
+}
+.clarify-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.clarify-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-xs);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.clarify-input:focus {
+  outline: 2px solid var(--stamp);
+  outline-offset: 1px;
+}
+
 /* THE LINE — the one thing the rep reads mid-conversation */
 .line-block {
   background: var(--card);

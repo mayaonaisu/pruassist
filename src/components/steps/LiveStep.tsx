@@ -275,12 +275,23 @@ function LiveConsole({
 
       {/* THE LINE — the one thing the rep reads mid-conversation. */}
       <div className="line-block">
-        {pointers.loading && !result ? (
+        {pointers.clarify ? (
+          // The orchestrator needs context before it will answer — ask the rep, then re-route.
+          <ClarifyPrompt prompt={pointers.clarify.prompt} onSubmit={pointers.clarifyAnswer} />
+        ) : pointers.loading && !result ? (
           <>
             <div className="pru-skeleton" style={{ height: 12, width: "30%", marginBottom: 12 }} />
             <div className="pru-skeleton" style={{ height: 22, width: "92%", marginBottom: 8 }} />
             <div className="pru-skeleton" style={{ height: 22, width: "64%" }} />
           </>
+        ) : pointers.mode === "topic_drift" && pointers.note ? (
+          // Off the selected scope: warn, don't generate.
+          <div className="pru-enter drift">
+            <div className="lb-head">
+              <span className="cat">Off topic</span>
+            </div>
+            <div className="concern">{pointers.note}</div>
+          </div>
         ) : !result ? (
           <>
             <div className="lb-head">
@@ -307,7 +318,7 @@ function LiveConsole({
         ) : (
           <div className="pru-enter">
             <div className="lb-head">
-              <span className="cat">Detected confusion</span>
+              <span className="cat">{RESULT_CAT[pointers.mode ?? ""] ?? "Detected confusion"}</span>
               {/* A prepared answer is announced, not slipped in: the rep is reading something
                   written before the question was asked, and should know it. */}
               {result.cached && <span className="ready">Prepared · verified</span>}
@@ -409,6 +420,43 @@ function LiveConsole({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// The eyebrow over a routed result, by orchestrator mode.
+const RESULT_CAT: Record<string, string> = {
+  policy_guidance: "Detected confusion",
+  comparison: "Comparison",
+  guider: "Suggested move",
+};
+
+// A clarification prompt: the rep types the missing context, which re-routes the turn.
+function ClarifyPrompt({ prompt, onSubmit }: { prompt: string; onSubmit: (context: string) => void }) {
+  const [text, setText] = useState("");
+  return (
+    <div className="pru-enter clarify">
+      <div className="lb-head">
+        <span className="cat">Clarify first</span>
+      </div>
+      <div className="concern">{prompt}</div>
+      <form
+        className="clarify-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (text.trim()) onSubmit(text.trim());
+        }}
+      >
+        <input
+          className="clarify-input"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Tell PRUAssist what to assume, e.g. comparing the base plan with PRUExtra"
+        />
+        <button className="said" type="submit" disabled={!text.trim()}>
+          Answer
+        </button>
+      </form>
     </div>
   );
 }

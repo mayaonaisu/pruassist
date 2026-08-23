@@ -2,17 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Stats } from "./console-types";
-import { lastFromCustomer, looksLikeQuestion, transcriptText, type Line } from "./transcript";
+import type { Mode } from "./agent/orchestrator/types";
+import { lastFromCustomer, transcriptText, type Line } from "./transcript";
 
-// The live suggestion path: when the customer asks something, fetch one line the rep could say,
-// grounded in the policy clauses, and count what was offered and used.
+// The live orchestrator path: on each substantive customer turn, ask the server what kind of help
+// the rep needs (the mode) and render it — a line to say, a proactive nudge, a clarify prompt, a
+// drift warning, or nothing. Also counts what was offered and used.
 
-// Long enough to give the model context, short enough that an old topic does not colour the
-// retrieval.
+// Long enough to give the model context, short enough that an old topic does not colour retrieval.
 const WINDOW = 12;
 
 // A beat after the customer stops, so a sentence finishing in two fragments is not two calls.
 const TRIGGER_DELAY_MS = 1400;
+
+// Skip ultra-short acks client-side; the server's wake-gate handles the rest cheaply.
+const MIN_WORDS = 3;
 
 type Src = { source: string; snippet: string };
 
@@ -32,9 +36,15 @@ export type Pointers = {
   unsupportedFigures: string[];
 };
 
+export type Clarify = { question: string; prompt: string };
+
 export type PointerConsole = {
   result: Pointers | null;
   note: string | undefined;
+  // The mode the orchestrator chose for the last turn — drives how the console renders it.
+  mode: Mode | null;
+  // Set when the orchestrator needs the rep to supply context before it will answer.
+  clarify: Clarify | null;
   loading: boolean;
   // Measured round trip for the last pointer. A cache hit is a real latency win, so it is measured
   // rather than asserted.
@@ -42,7 +52,9 @@ export type PointerConsole = {
   used: Set<string>;
   openKey: string | null;
   setOpenKey: (fn: (k: string | null) => string | null) => void;
-  ask: (opts?: { rephrase?: boolean }) => Promise<void>;
+  ask: (opts?: { rephrase?: boolean; clarifyContext?: string }) => Promise<void>;
+  // The rep answers a clarification prompt; re-asks with that context so the turn re-routes.
+  clarifyAnswer: (context: string) => Promise<void>;
   markUsed: (key: string) => void;
   dismiss: () => void;
   stats: () => Stats;
@@ -63,6 +75,8 @@ export function usePointers({
 }): PointerConsole {
   const [result, setResult] = useState<Pointers | null>(null);
   const [note, setNote] = useState<string>();
+  const [mode, setMode] = useState<Mode | null>(null);
+  const [clarify, setClarify] = useState<Clarify | null>(null);
   const [loading, setLoading] = useState(false);
   const [used, setUsed] = useState<Set<string>>(new Set());
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -76,7 +90,7 @@ export function usePointers({
 
   // `rephrase` replaces the current pointers, so it must not re-count them as new flags.
   const ask = useCallback(
-    async ({ rephrase = false }: { rephrase?: boolean } = {}) => {
+    async ({ rephrase = false, clarifyContext }: { rephrase?: boolean; clarifyContext?: string } = {}) => {
       if (inFlightRef.current) return;
       const window = latest().slice(-WINDOW);
       const transcript = transcriptText(window);
@@ -92,20 +106,34 @@ export function usePointers({
         const res = await fetch("/api/assist", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // roomId lets the route scope retrieval to the session's product area — the context the
-          // rep set at consent. `asked` is the question on its own, so the route can check it
-          // against what the background pass prepared.
           body: JSON.stringify({
             transcript,
             roomId,
             asked: lastFromCustomer(latest(), repName),
+            clarifyContext,
           }),
         });
         const data = await res.json();
-        if (data.note) {
-          setNote(data.note);
+        setMode((data.mode as Mode) ?? null);
+
+        // The orchestrator wants context from the rep before it answers.
+        if (data.mode === "clarification") {
+          setClarify(data.clarify ?? null);
+          setResult(null);
+          setNote(undefined);
           return;
         }
+        setClarify(null);
+
+        // No line to say: keep_listening (note null → idle), topic_drift (note is the warning), or
+        // a no-clause note. LiveStep uses `mode` to tell a drift banner from a plain idle note.
+        if (!data.suggestedLine) {
+          setNote(data.note ?? undefined);
+          setResult(null);
+          setLatencyMs(Math.round(performance.now() - startedRequest));
+          return;
+        }
+
         const r: Pointers = {
           concern: data.concern || "",
           firstStep: data.firstStep || "",
@@ -138,12 +166,15 @@ export function usePointers({
     [roomId, repName, latest],
   );
 
-  // Fires on the customer's questions only, once per line.
+  // Fires on any substantive customer turn (not only questions), once per line — so the proactive
+  // modes (guider, drift, clarification) can trigger too. Ultra-short acks are skipped here; the
+  // server wake-gate keeps a bare "okay, that makes sense" from spending a brain call.
   useEffect(() => {
     if (!auto) return;
     const last = lines[lines.length - 1];
     if (!last || last.speaker === repName) return;
-    if (lastTriggerRef.current === last.id || !looksLikeQuestion(last.text)) return;
+    if (lastTriggerRef.current === last.id) return;
+    if (last.text.trim().split(/\s+/).filter(Boolean).length < MIN_WORDS) return;
     lastTriggerRef.current = last.id;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => ask(), TRIGGER_DELAY_MS);
@@ -156,6 +187,14 @@ export function usePointers({
     [],
   );
 
+  const clarifyAnswer = useCallback(
+    async (context: string) => {
+      setClarify(null);
+      await ask({ clarifyContext: context });
+    },
+    [ask],
+  );
+
   const markUsed = useCallback(
     (key: string) => {
       if (used.has(key)) return;
@@ -166,7 +205,12 @@ export function usePointers({
   );
 
   const stats = useCallback(() => ({ ...statsRef.current, docs: docsRef.current.size }), []);
-  const dismiss = useCallback(() => setResult(null), []);
+  const dismiss = useCallback(() => {
+    setResult(null);
+    setClarify(null);
+    setNote(undefined);
+    setMode(null);
+  }, []);
 
-  return { result, note, loading, latencyMs, used, openKey, setOpenKey, ask, markUsed, dismiss, stats };
+  return { result, note, mode, clarify, loading, latencyMs, used, openKey, setOpenKey, ask, clarifyAnswer, markUsed, dismiss, stats };
 }
