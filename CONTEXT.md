@@ -144,7 +144,9 @@ failing — no key, a timeout, or non-JSON output falls through to the next tier
 The orchestrator decides *how to help this turn*; it never decides *whether a recommendation is
 safe* — that stays with the deterministic **Readiness** spine on the state poll. The generating
 modes (policy / comparison / guider) reuse the same retrieve → generate → grounding-check machinery
-the assist route always used; `guider` retrieves only when its pointer cites policy facts.
+the assist route always used; `guider` spends a model call only when the remark names a concept —
+so its benefits can be grounded — and stays quiet (no retrieval, no generation) otherwise, to keep
+the generalized trigger from burning generation quota.
 
 ## Teach-back
 

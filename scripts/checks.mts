@@ -34,6 +34,7 @@ const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await im
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
 const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
 const { runOrchestrator } = await import("../src/lib/agent/orchestrator/graph.ts");
+const { handleGuider } = await import("../src/lib/agent/orchestrator/handlers.ts");
 
 type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
@@ -477,6 +478,14 @@ test("router: an in-scope question routes to policy guidance", () => {
 test("router: the deterministic tier leaves a bare statement at keep_listening", () => {
   // guider is an LLM-brain mode; with the brain down the safe fallback is silence, not a guess.
   assert.equal(decideMode(routerInput("I really like PRUShield.")).mode, "keep_listening");
+});
+
+test("guider spends no model call when the remark names no concept", async () => {
+  // Hermetic: with no concept named the handler returns before any retrieve/generate, so this
+  // pins the Gemini-burn guard without touching the network.
+  const r = await handleGuider({ asked: "I need to think about it.", transcript: "Customer: I need to think about it.", state: emptyState("r", AREA), scope: AREA });
+  assert.equal(r.mode, "keep_listening");
+  assert.ok(!r.pointers);
 });
 
 test("the LangGraph orchestrator compiles and the wake-gate short-circuits an ack", async () => {

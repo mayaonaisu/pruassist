@@ -87,12 +87,14 @@ export async function handleComparison(input: OrchestratorInput): Promise<Orches
 }
 
 export async function handleGuider(input: OrchestratorInput): Promise<OrchestratorResult> {
-  // Retrieve only when the remark names a concept/product, so any "benefits" offered are grounded;
-  // a purely conversational remark gets a bare nudge with no retrieval.
+  // A guider only earns a model call when the remark names a concept/product — then its "benefits"
+  // can be grounded in the clauses. A bare remark that names nothing gets NO retrieval and NO
+  // generation: staying quiet beats spending a Gemini call on an ungrounded nudge.
   const named = conceptsMentioned(input.asked, conceptsForArea(input.scope));
-  const hits = named.length ? await retrieve(input.asked, 3, input.scope) : [];
+  if (!named.length) return { mode: "keep_listening" };
+
+  const hits = await retrieve(input.asked, 3, input.scope);
   const gen = await generate(guidanceSystemInstruction(input.scope), hits, input.transcript);
-  // A failed nudge is not worth a note — just fall quiet.
   if (!gen) return { mode: "keep_listening" };
   return { mode: "guider", pointers: gen.pointers, sources: sourcesOf(hits), unsupportedFigures: gen.unsupportedFigures };
 }
