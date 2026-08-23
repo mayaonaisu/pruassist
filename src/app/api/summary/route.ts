@@ -5,7 +5,7 @@ import { currentRep } from "@/lib/auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3.6-flash";
 
 // Summarises the advisory conversation into a post-session brief for the rep.
 export async function POST(req: NextRequest) {

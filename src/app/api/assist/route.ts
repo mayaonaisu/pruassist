@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Fast Gemini model for low-latency live suggestions.
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3.6-flash";
 
 export async function POST(req: NextRequest) {
   // Rep-only: this route spends billed Gemini calls.
