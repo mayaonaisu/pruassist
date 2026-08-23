@@ -11,10 +11,12 @@
  * Run it against a Vercel preview too. `next dev` and `next start` both keep the process alive
  * forever, so neither proves `after()` survives on a real serverless invocation.
  *
- * Budget it. One full run spends around twenty Gemini calls, and the free tier allows twenty per
- * model per day and ten per minute. Two runs in a day will fail the lookahead half on quota, not
- * on anything wrong with the code — check the server log for a 429 and its quotaId before
- * believing otherwise. PRUASSIST_MODEL points at a different model with its own allowance.
+ * Budget it. One full run spends around twenty Gemini calls against a per-key daily/per-minute free
+ * limit. A failing lookahead/grade is often environmental rather than a code bug — but do NOT assume
+ * it is a 429: check the deploy logs for the ACTUAL status. It may be a 400 invalid key (a bad value
+ * in the env), a 503 (model busy), a timeout, or a 429 (quota). Each has a different fix, and reading
+ * the real error first saves chasing the wrong one. PRUASSIST_MODEL points at a model with its own
+ * allowance; the key pool rotates past bad/rate-limited/busy keys.
  */
 
 import { readFileSync } from "node:fs";
@@ -225,7 +227,7 @@ check("misconception caught", prepared.alert?.kind === "misunderstood", prepared
 check(
   "lookahead prepared an answer",
   Boolean(prepared.prepared),
-  prepared.prepared ? `“${prepared.prepared.question}” · ${prepared.prepared.label}` : "none — check the log for a 429",
+  prepared.prepared ? `“${prepared.prepared.question}” · ${prepared.prepared.label}` : "none prepared — check the deploy logs for the real model error (400 invalid key · 429 quota · 503 busy · or a timeout), not just a 429",
 );
 
 if (prepared.prepared) {

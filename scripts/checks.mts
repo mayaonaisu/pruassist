@@ -30,7 +30,7 @@ const { clauseById } = await import("../src/lib/knowledge.ts");
 const { applyActs, applyDetections, buildRecord, chooseAlert, saveState, loadState } = await import("../src/lib/agent/ledger.ts");
 const { getStore } = await import("../src/lib/store.ts");
 const { callWithRetry } = await import("../src/lib/agent/gemini.ts");
-const { resetPool } = await import("../src/lib/genai.ts");
+const { resetPool, isInvalidKeyError } = await import("../src/lib/genai.ts");
 const { buildComplianceRecord, renderComplianceHtml } = await import("../src/lib/agent/record.ts");
 const { rankByRisk, anchorClauses } = await import("../src/lib/agent/lookahead.ts");
 const { matchesLookahead } = await import("../src/lib/agent/cache.ts");
@@ -635,6 +635,16 @@ test("fixTerms leaves ordinary speech untouched and is idempotent", () => {
 });
 
 /* ---------- a bad key must not kill a generation call ---------- */
+
+test("isInvalidKeyError flags a bad key across shapes — and only a bad key, not any 400", () => {
+  const bad = (msg: string, status = 400) => Object.assign(new Error(msg), { status });
+  assert.equal(isInvalidKeyError(bad("API key not valid. Please pass a valid API key.")), true);
+  assert.equal(isInvalidKeyError(bad('{"error":{"status":"INVALID_ARGUMENT","message":"API_KEY_INVALID"}}')), true);
+  // A different 400 (e.g. an unsupported thinking level) is NOT a key error — rotating every key on
+  // it would be wrong, so it must return false.
+  assert.equal(isInvalidKeyError(bad("Thinking level MINIMAL is not supported for this model.")), false);
+  assert.equal(isInvalidKeyError(bad("API key not valid", 429)), false, "429 is not a key error");
+});
 
 test("callWithRetry rotates past an invalid-key 400 instead of failing the whole call", async () => {
   // A revoked/mis-pasted key in the pool returns 400 API_KEY_INVALID. With other keys available it

@@ -1,5 +1,5 @@
 import { KNOWLEDGE, areaOfClause, type Clause } from "./knowledge";
-import { cooldownFor, getAi, keyCount, rotateAfterRateLimit, statusOf } from "./genai";
+import { cooldownFor, getAi, isInvalidKeyError, keyCount, rotateAfterRateLimit, statusOf, TRANSIENT_STATUS } from "./genai";
 
 // Embedding failures are logged, never swallowed: silent fallback once faked semantic grounding.
 const EMBED_MODEL = "gemini-embedding-001";
@@ -12,9 +12,9 @@ type TaskType = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY" | "SEMANTIC_SIMILARITY"
 
 async function embedBatch(texts: string[], taskType: TaskType): Promise<(number[] | null)[]> {
   const nothing = () => texts.map(() => null);
-  // Embeddings have their own quota, but it is still per key — so a rate limit rotates rather than
-  // dropping the whole corpus to keyword matching. No sleeping here: retrieval sits on the live
-  // path, and the lexical fallback is a better answer than a waiting rep.
+  // Embeddings have their own quota, but it is still per key — so rotate past a bad, rate-limited,
+  // or busy key rather than dropping the whole corpus to keyword matching on the first bad key. No
+  // sleeping here: retrieval sits on the live path, and the lexical fallback beats a waiting rep.
   for (let attempt = 0; attempt <= keyCount(); attempt++) {
     const ai = getAi();
     if (!ai) return nothing();
@@ -22,8 +22,12 @@ async function embedBatch(texts: string[], taskType: TaskType): Promise<(number[
       const res = await ai.models.embedContent({ model: EMBED_MODEL, contents: texts, config: { taskType } });
       return texts.map((_, i) => res.embeddings?.[i]?.values ?? null);
     } catch (e) {
-      if (statusOf(e) === 429 && rotateAfterRateLimit(cooldownFor(e))) continue;
-      console.error(`[retrieval] ${taskType} embedding failed (model ${EMBED_MODEL}):`, e);
+      const status = statusOf(e);
+      // A bad key (invalid 400) or a rate-limited/busy key (429/503) is skipped, not fatal — the
+      // same resilience the generation path has. Only a genuinely terminal error drops to keywords.
+      if (isInvalidKeyError(e) && rotateAfterRateLimit(24 * 60 * 60 * 1000)) continue;
+      if (status && TRANSIENT_STATUS.includes(status) && rotateAfterRateLimit(cooldownFor(e))) continue;
+      console.error(`[retrieval] ${taskType} embedding failed (${status ?? "error"}, model ${EMBED_MODEL}):`, e);
       return nothing();
     }
   }

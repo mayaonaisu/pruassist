@@ -1,6 +1,6 @@
 import type { GoogleGenAI } from "@google/genai";
 import { ThinkingLevel, type ThinkingConfig } from "@google/genai";
-import { cooldownFor, getAi, keyCount, rotateAfterRateLimit, statusOf, TRANSIENT_STATUS } from "../genai";
+import { cooldownFor, getAi, isInvalidKeyError, keyCount, rotateAfterRateLimit, statusOf, TRANSIENT_STATUS } from "../genai";
 
 // How the agent talks to Gemini: which model, how hard it should think, and what to do when the
 // quota says no. The keys themselves live in ../genai, which both this and retrieval share.
@@ -88,10 +88,9 @@ export async function callWithRetry<T>(
     } catch (e) {
       const status = statusOf(e);
       const msg = e instanceof Error ? e.message : String(e);
-      // A key the project rejects — revoked, wrong, or mangled in the env (quotes/whitespace) —
-      // returns 400 API_KEY_INVALID, which is NOT transient and NOT the whole pool's fault. One bad
-      // key must not kill the call: cool it off hard and try the next one, exactly like a rate limit.
-      if (status === 400 && /api[ _]?key[ _]?(?:not valid|invalid)|API_KEY_INVALID/i.test(msg) && rotateAfterRateLimit(24 * 60 * 60 * 1000)) {
+      // A bad key (400 API_KEY_INVALID) is not transient and not the whole pool's fault. One bad key
+      // must not kill the call: cool it off hard and try the next one, exactly like a rate limit.
+      if (isInvalidKeyError(e) && rotateAfterRateLimit(24 * 60 * 60 * 1000)) {
         console.error(`[${label}] invalid API key — rotating to another key`);
         continue;
       }

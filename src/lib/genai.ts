@@ -87,6 +87,16 @@ export function statusOf(e: unknown): number | undefined {
   return (e as { status?: number })?.status;
 }
 
+// A key the project rejects — revoked, wrong, or mangled in the env — returns a 400 whose message
+// says the key is invalid. Distinct from other 400s (e.g. an unsupported thinking level), which are
+// the request's fault, not the key's: rotating every key on those would be wrong. Callers rotate
+// past a bad key exactly as they would a rate limit.
+export function isInvalidKeyError(e: unknown): boolean {
+  if (statusOf(e) !== 400) return false;
+  const msg = e instanceof Error ? e.message : String(e);
+  return /api[ _]?key[ _]?(?:not valid|invalid)|API_KEY_INVALID/i.test(msg);
+}
+
 // Only for the replay harness, which deletes the key env vars before importing.
 export function resetPool(): void {
   pool = null;
