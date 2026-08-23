@@ -123,8 +123,10 @@ export async function runToolLoop(
   ctx: ToolContext,
   // allowSleep:false is for the live path — the rep is waiting, so a rate-limited call rotates keys
   // rather than sleeping out a backoff. maxSteps bounds latency: the background lookahead can afford
-  // the full loop, but the live handlers cap it so a rep never waits on three sequential model calls.
-  { allowSleep = true, maxSteps = MAX_TOOL_STEPS } = {},
+  // the full loop, but the live handlers cap it. `think` off is safe when maxSteps is 1 — tool
+  // SELECTION is trivial with a single search, so the reasoning budget that helps multi-step loops
+  // only adds latency the rep would feel.
+  { allowSleep = true, maxSteps = MAX_TOOL_STEPS, think = "dynamic" }: { allowSleep?: boolean; maxSteps?: number; think?: "off" | "dynamic" } = {},
 ): Promise<{ text: string; run: ToolRun } | null> {
   if (!haveKey()) return null;
 
@@ -141,9 +143,9 @@ export async function runToolLoop(
           config: {
             systemInstruction: instruction,
             tools: [{ functionDeclarations: DECLARATIONS }],
-            // -1 leaves the budget dynamic. Pinning it to 0 measurably degrades multi-step tool
-            // selection, and choosing what to search for is the whole job of this phase.
-            thinkingConfig: thinking("dynamic"),
+            // Dynamic thinking is worth its latency for a multi-step loop (choosing what to search
+            // is the job); a single-step live gather sets it off to stay inside the rep's patience.
+            thinkingConfig: thinking(think),
             temperature: 0.2,
             maxOutputTokens: JSON_BUDGET * 2,
           },
