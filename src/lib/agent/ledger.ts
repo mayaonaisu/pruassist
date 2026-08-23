@@ -270,16 +270,22 @@ export async function loadState(roomId: string, productArea: string): Promise<Ag
   return stored.productArea === productArea ? stored : { ...stored, productArea };
 }
 
-// The deep pass is the only writer of this key, and it is debounced per room, so a plain write
-// is safe. `expectedRev` is a cheap guard against two passes overlapping: it is best-effort
-// rather than a compare-and-swap, and a dropped write is recovered on the next pass because the
-// cursor only advances on a successful one.
+// Written as an atomic compare-and-set: `next` lands only if the stored rev still equals
+// `expectedRev`, so two overlapping passes can't both win and lose an update between them — the
+// record this becomes is a compliance artifact, so a dropped write must be a clean rejection, not
+// a silent clobber. A rejected write is recovered on the next pass because the cursor only advances
+// on a successful one. Falls back to the previous best-effort guard if a store has no server-side
+// eval — never worse than before.
 export async function saveState(next: AgentState, expectedRev: number): Promise<boolean> {
   const store = getStore();
-  const current = await store.get<AgentState>(stateKey(next.roomId));
-  if (current && current.rev !== expectedRev) return false;
-  await store.set(stateKey(next.roomId), next, DEFAULT_TTL);
-  return true;
+  try {
+    return await store.casByRev(stateKey(next.roomId), expectedRev, next, DEFAULT_TTL);
+  } catch {
+    const current = await store.get<AgentState>(stateKey(next.roomId));
+    if (current && current.rev !== expectedRev) return false;
+    await store.set(stateKey(next.roomId), next, DEFAULT_TTL);
+    return true;
+  }
 }
 
 export async function pushAct(roomId: string, act: RepAct): Promise<void> {

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SummaryData } from "@/lib/console-types";
 import type { ConceptState, RecordRow } from "@/lib/agent/types";
+import { buildComplianceRecord, renderComplianceHtml } from "@/lib/agent/record";
 
 // What each state means on the record. The wording is deliberately about what was observed, never
 // about the customer: "agreed, never demonstrated" is a fact; "did not understand" is a verdict.
@@ -37,6 +38,30 @@ export default function SummaryStep({
     // These notes exist only here and feed only the export, so leaving loses them for good.
     if (notes.trim() && !window.confirm("Your typed notes haven’t been exported and will be lost. Start a new session anyway?")) return;
     onNewSession();
+  };
+
+  // The Understanding Record as a standalone, print-ready compliance document — the suitability
+  // trail. Opens in a new tab (Save as PDF from there); falls back to a download if a popup is
+  // blocked. Built from the same record the page already shows.
+  const exportRecord = () => {
+    const record = buildComplianceRecord(summary.record, {
+      productArea,
+      signedBy: summary.signedBy,
+      customerName: summary.customerName,
+      durationMin: summary.durationMin,
+    });
+    const html = renderComplianceHtml(record, { generatedAt: new Date().toLocaleString() });
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    const win = window.open(url, "_blank");
+    if (!win) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "pruassist-understanding-record.html";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
   };
 
   const exportBrief = () => {
@@ -145,8 +170,11 @@ export default function SummaryStep({
       </p>
 
       <div className="actions-row">
-        <button className="pru-btn pru-btn-primary" onClick={exportBrief}>
-          Export brief
+        <button className="pru-btn pru-btn-primary" onClick={exportRecord}>
+          Export understanding record
+        </button>
+        <button className="pru-btn" onClick={exportBrief}>
+          Export text brief
         </button>
         <button className="pru-btn" onClick={startNew}>
           Start new session

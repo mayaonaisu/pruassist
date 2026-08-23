@@ -27,7 +27,9 @@ delete process.env.ORCHESTRATOR_API_KEY;
 const { CONCEPTS, conceptById, conceptsForArea } = await import("../src/lib/concepts.ts");
 const { scorePass } = await import("../src/lib/agent/score.ts");
 const { clauseById } = await import("../src/lib/knowledge.ts");
-const { applyActs, applyDetections, buildRecord, chooseAlert } = await import("../src/lib/agent/ledger.ts");
+const { applyActs, applyDetections, buildRecord, chooseAlert, saveState, loadState } = await import("../src/lib/agent/ledger.ts");
+const { getStore } = await import("../src/lib/store.ts");
+const { buildComplianceRecord, renderComplianceHtml } = await import("../src/lib/agent/record.ts");
 const { rankByRisk, anchorClauses } = await import("../src/lib/agent/lookahead.ts");
 const { matchesLookahead } = await import("../src/lib/agent/cache.ts");
 const { isBareAssent, isQuestion } = await import("../src/lib/agent/utterance.ts");
@@ -594,6 +596,92 @@ test("fixTerms leaves ordinary speech untouched and is idempotent", () => {
   const once = fixTerms("pru shield and pru extra");
   assert.equal(once, "PRUShield and PRUExtra");
   assert.equal(fixTerms(once), once, "a second pass changes nothing");
+});
+
+/* ---------- the compliance record export (the suitability trail) ---------- */
+
+const CR_META = { productArea: AREA, signedBy: "Nikole Tan", customerName: "Mr Lim", durationMin: 18 };
+const CR_ROWS = [
+  { conceptId: "deductible-definition", label: "Deductible", state: "demonstrated" as const, at: AT, quote: "the part you settle first, once a year", citations: ["PRUShield brochure (Apr 2026) · p.12"], risk: "" },
+  { conceptId: "co-insurance", label: "Co-insurance", state: "asserted" as const, at: AT + 1000, quote: "okay, that makes sense", citations: ["PRUShield brochure (Apr 2026) · p.13"], risk: "Agreed, never demonstrated" },
+  { conceptId: "panel-providers", label: "Panel providers", state: "misunderstood" as const, at: AT + 2000, quote: "any hospital, it's the same coverage right?", citations: ["PRUShield brochure (Apr 2026) · p.14, p.15"], risk: "Correct this next time" },
+];
+
+test("the compliance verdict withholds a recommendation while any concept is unsettled", () => {
+  const r = buildComplianceRecord(CR_ROWS, CR_META);
+  assert.equal(r.verdict.settled, 1, "one demonstrated");
+  assert.equal(r.verdict.contradicting, 1, "one misunderstood");
+  assert.equal(r.verdict.open, 2, "asserted + misunderstood are both open");
+  assert.equal(r.verdict.clear, false);
+  assert.match(r.verdict.line, /not ready to recommend/i);
+});
+
+test("the compliance verdict clears only when every concept is demonstrated", () => {
+  const allShown = CR_ROWS.map((r) => ({ ...r, state: "demonstrated" as const, risk: "" }));
+  const r = buildComplianceRecord(allShown, CR_META);
+  assert.equal(r.verdict.clear, true);
+  assert.equal(r.verdict.open, 0);
+  assert.match(r.verdict.line, /ready to recommend/i);
+});
+
+test("compliance rows carry the customer's own words, the brochure pages, and a plain state label", () => {
+  const r = buildComplianceRecord(CR_ROWS, CR_META);
+  const panel = r.rows.find((x) => x.label === "Panel providers");
+  assert.ok(panel);
+  assert.equal(panel.quote, "any hospital, it's the same coverage right?");
+  assert.equal(panel.pages, "p.14, p.15", "document name stripped, pages kept");
+  assert.equal(panel.stateLabel, "Misunderstood");
+  assert.equal(r.meta.customerName, "Mr Lim");
+  assert.ok(r.disclaimer.length > 0);
+});
+
+test("an empty session produces a record with a defensible empty verdict, not a crash", () => {
+  const r = buildComplianceRecord([], CR_META);
+  assert.equal(r.rows.length, 0);
+  assert.equal(r.verdict.settled, 0);
+  assert.equal(r.verdict.open, 0);
+});
+
+test("the rendered document carries the verdict, the customer, and escapes quoted words safely", () => {
+  const html = renderComplianceHtml(buildComplianceRecord(CR_ROWS, CR_META), { generatedAt: "23 Aug 2026" });
+  assert.match(html, /not ready to recommend/i);
+  assert.ok(html.includes("Mr Lim"));
+  assert.ok(html.includes("Panel providers"));
+  // A quote containing markup must not break out of the document.
+  const evil = buildComplianceRecord([{ ...CR_ROWS[0], quote: '<script>x</script>' }], CR_META);
+  assert.ok(!renderComplianceHtml(evil).includes("<script>x"), "quotes are HTML-escaped");
+});
+
+/* ---------- the ledger write is a true compare-and-set (QW3) ---------- */
+
+test("casByRev writes when the key is empty, and round-trips the value", async () => {
+  const store = getStore();
+  const k = "cas:new";
+  await store.del(k);
+  assert.equal(await store.casByRev(k, 0, { rev: 1, v: "a" }), true);
+  assert.deepEqual(await store.get(k), { rev: 1, v: "a" });
+});
+
+test("casByRev rejects a write whose expected rev no longer matches the stored one", async () => {
+  const store = getStore();
+  const k = "cas:stale";
+  await store.set(k, { rev: 5, v: "current" });
+  // A writer that read rev 4 must lose: the value moved on under it.
+  assert.equal(await store.casByRev(k, 4, { rev: 6, v: "stale-writer" }), false);
+  assert.deepEqual(await store.get(k), { rev: 5, v: "current" }, "the stored value is untouched");
+  // A writer that read the current rev succeeds.
+  assert.equal(await store.casByRev(k, 5, { rev: 6, v: "fresh-writer" }), true);
+  assert.deepEqual(await store.get(k), { rev: 6, v: "fresh-writer" });
+});
+
+test("saveState is a true compare-and-set: two passes at the same rev cannot both win", async () => {
+  const base = { ...emptyState("cas-room", AREA), rev: 2 };
+  // First pass loaded rev 2 and writes rev 3.
+  assert.equal(await saveState({ ...base, rev: 3, updatedAt: 1 }, 2), true);
+  assert.equal((await loadState("cas-room", AREA)).rev, 3);
+  // Second pass also loaded rev 2 — it must be rejected rather than clobber rev 3 (a lost update).
+  assert.equal(await saveState({ ...base, rev: 3, updatedAt: 2 }, 2), false);
+  assert.equal((await loadState("cas-room", AREA)).rev, 3, "no lost update");
 });
 
 test("anchorClauses gives the lookahead a reliable, on-topic fallback when the tool loop gathers nothing", () => {
