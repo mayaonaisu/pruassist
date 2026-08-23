@@ -121,6 +121,10 @@ export async function runToolLoop(
   instruction: string,
   task: string,
   ctx: ToolContext,
+  // The live path passes allowSleep:false: the rep is waiting and maxDuration is 30s, so a
+  // rate-limited call must rotate keys, never sleep out a 20s backoff. Background callers leave it
+  // true — a lookahead held open a little longer is fine.
+  { allowSleep = true } = {},
 ): Promise<{ text: string; run: ToolRun } | null> {
   if (!haveKey()) return null;
 
@@ -128,20 +132,23 @@ export async function runToolLoop(
   const run: ToolRun = { cited: [], steps: 0, transcript: [] };
 
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
-    const res = await callWithRetry("tools", (ai) =>
-      ai.models.generateContent({
-        model: MODEL,
-        contents,
-        config: {
-          systemInstruction: instruction,
-          tools: [{ functionDeclarations: DECLARATIONS }],
-          // -1 leaves the budget dynamic. Pinning it to 0 measurably degrades multi-step tool
-          // selection, and choosing what to search for is the whole job of this phase.
-          thinkingConfig: thinking("dynamic"),
-          temperature: 0.2,
-          maxOutputTokens: JSON_BUDGET * 2,
-        },
-      }),
+    const res = await callWithRetry(
+      "tools",
+      (ai) =>
+        ai.models.generateContent({
+          model: MODEL,
+          contents,
+          config: {
+            systemInstruction: instruction,
+            tools: [{ functionDeclarations: DECLARATIONS }],
+            // -1 leaves the budget dynamic. Pinning it to 0 measurably degrades multi-step tool
+            // selection, and choosing what to search for is the whole job of this phase.
+            thinkingConfig: thinking("dynamic"),
+            temperature: 0.2,
+            maxOutputTokens: JSON_BUDGET * 2,
+          },
+        }),
+      { allowSleep },
     );
     // Speculative work: a failure here costs nothing but the speculation, so it never propagates.
     if (!res) return run.cited.length ? { text: "", run } : null;

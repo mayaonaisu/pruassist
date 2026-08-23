@@ -160,6 +160,33 @@ if (state.alert) {
   }
 }
 
+/* ---------- topic-drift escalation (needs a live router brain) ---------- */
+// Only the LLM brain emits topic_drift; the deterministic tier never does. So if the first
+// off-topic turn does not route to drift, the brain is unconfigured — skip the rest rather than
+// fail. Reuses this session; the session-end below clears the drift streak with everything else.
+
+const assist = async (asked) => {
+  const res = await fetch(`${BASE}/api/assist`, {
+    method: "POST",
+    headers: H,
+    body: JSON.stringify({ roomId: session.roomId, transcript: `Bryan Eng: Let's stay on your hospital cover.\nCustomer: ${asked}`, asked }),
+  });
+  return res.json();
+};
+
+const drift1 = await assist("Can I invest with this, like buying shares?");
+if (drift1.mode !== "topic_drift") {
+  console.log(`  ...   skipping drift escalation — router did not classify drift (mode=${drift1.mode}); needs ORCHESTRATOR_* configured`);
+} else {
+  check("first off-topic turn warns", drift1.mode === "topic_drift", drift1.note?.slice(0, 60));
+  const drift2 = await assist("And did you catch the football results yesterday?");
+  check("a second consecutive drift pauses", drift2.mode === "drift_paused", drift2.mode);
+  const drift3 = await assist("The weather has been really hot lately.");
+  check("an off-topic statement stays paused, no model call", drift3.mode === "drift_paused", drift3.mode);
+  const resumed = await assist("Okay, so how much is the deductible again?");
+  check("an on-topic question resumes the pipeline", resumed.mode !== "drift_paused" && resumed.mode !== "topic_drift", resumed.mode);
+}
+
 await fetch(`${BASE}/api/session/end`, {
   method: "POST",
   headers: H,

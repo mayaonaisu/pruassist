@@ -1,4 +1,5 @@
 // PRUShield / PRUExtra clauses from the public brochure (Apr 2026). Re-verify figures before real advisory use.
+// Adding a new product document? See docs/kb-authoring.md for the extraction-to-clause workflow.
 
 export type Clause = { id: string; source: string; text: string };
 

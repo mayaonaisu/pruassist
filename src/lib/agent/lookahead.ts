@@ -1,11 +1,13 @@
 import { Type } from "@google/genai";
 import { citationsFor, conceptsForArea, type Concept } from "../concepts";
+import { clauseById, type Clause } from "../knowledge";
 import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "./gemini";
 import { haveKey } from "../genai";
 import { clauseBlock, HOUSE_RULES, POINTER_FIELDS, POSTURE } from "./prompts";
 import { activeDecision } from "./readiness";
 import { runToolLoop } from "./tools";
 import { verifyGrounding } from "./verify";
+import { retrieve, type Hit } from "../retrieval";
 import type { AgentState, Lookahead, Pointers } from "./types";
 
 // Speculative execution for a conversation.
@@ -59,6 +61,16 @@ export function rankByRisk(state: AgentState): Concept[] {
     .map((x) => x.c);
 }
 
+// A concept's own anchor clauses, as retrieval-shaped hits. Guaranteed to exist (import-time
+// integrity throws otherwise) and exactly on topic — the reliable fallback when the tool loop
+// returns without searching.
+export function anchorClauses(concept: Concept): Hit[] {
+  return concept.clauseIds
+    .map(clauseById)
+    .filter((c): c is Clause => Boolean(c))
+    .map((c) => ({ ...c, score: 1 }));
+}
+
 /**
  * Prepares the answer to the likeliest next question about the riskiest open concept. Returns
  * null when there is nothing worth preparing, when generation fails, or when the answer does not
@@ -78,9 +90,10 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
   const gathered = await runToolLoop(
     `${POSTURE} You are preparing, in the background, for the question this customer is most likely ` +
       `to ask next. ${HOUSE_RULES} Read the ledger to see what they have agreed to without ` +
-      `demonstrating and what they got wrong, then search the policy for the clauses that would ` +
-      `answer their next question. When you have what you need, write a short evidence brief: the ` +
-      `single question you expect, and the clause facts that answer it. Do not write the reply itself.`,
+      `demonstrating and what they got wrong. You MUST call search_policy at least once — never ` +
+      `write the brief without searching first — for the clauses that would answer their next ` +
+      `question. When you have what you need, write a short evidence brief: the single question you ` +
+      `expect, and the clause facts that answer it. Do not write the reply itself.`,
     `The representative is discussing ${state.productArea}. The concept most at risk right now is ` +
       `"${target.label}". Recent conversation:\n${recent || "(nothing yet)"}\n\n` +
       `Work out the one question this customer is most likely to ask next about it, and gather the ` +
@@ -89,7 +102,15 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
   );
   if (!gathered) return null;
 
-  const clauses = gathered.run.cited;
+  // The tool loop occasionally returns without calling search_policy, gathering no clauses. Rather
+  // than skip preparing entirely, retrieve the target concept's clauses directly — the same breadth
+  // search_policy would have produced — so a grounded answer is still prepared. This is what makes
+  // the lookahead reliable instead of intermittently empty.
+  let clauses: Hit[] = gathered.run.cited;
+  if (!clauses.length) clauses = await retrieve(`${target.label} ${target.terms.join(" ")}`, 4, state.productArea);
+  // Last resort if retrieval itself returns nothing (e.g. embeddings unavailable): the concept's
+  // own anchor clauses, which always exist.
+  if (!clauses.length) clauses = anchorClauses(target);
   if (!clauses.length) return null;
 
   // Phase 2: tools off, structured output, over a FRESH contents built from plain text. Structured
@@ -163,7 +184,9 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
     pointers: rest,
     sources: clauses.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) })),
     citations: citationsFor(target),
-    toolCalls: gathered.run.transcript,
+    // Records how the evidence was gathered — the tools the loop called, or a marker that it
+    // returned without searching and the clauses came from the retrieval fallback.
+    toolCalls: gathered.run.transcript.length ? gathered.run.transcript : [`fallback: retrieved ${target.id} clauses`],
     verified: true,
     preparedAt: Date.now(),
     rev: state.rev,

@@ -3,6 +3,7 @@ import { RoomServiceClient } from "livekit-server-sdk";
 import { currentRep } from "@/lib/auth";
 import { endSession } from "@/lib/sessions";
 import { clearAgentState } from "@/lib/agent/ledger";
+import { clearDrift } from "@/lib/agent/orchestrator/drift";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export async function POST(req: NextRequest) {
   // The comprehension evidence is quoted customer speech. It has done its job once the record is
   // in the rep's hands, so it goes now rather than waiting out its 24-hour TTL.
   await clearAgentState(roomId);
+  await clearDrift(roomId);
 
   // Disconnect the customer (and anyone else) by deleting the LiveKit room.
   const apiKey = process.env.LIVEKIT_API_KEY;

@@ -8,8 +8,13 @@ export type Mode =
   | "policy_guidance" // a policy question: retrieve clauses and answer it
   | "comparison" // weighing options: retrieve the decision's clauses, say what is unsettled
   | "guider" // a proactive advisory nudge; retrieves only when it cites policy facts
-  | "topic_drift" // off the selected scope: warn, and halt if it persists
+  | "topic_drift" // off the selected scope: warn once, then pause (see orchestrator/drift.ts)
   | "clarification"; // too vague to answer: ask the rep for context, then re-route
+
+// The response-level mode the assist route can return, on top of the orchestrator's own modes.
+// `drift_paused` is produced by the route (drift.ts), never by a handler or the brain, so it stays
+// out of the Mode union that keys the handler map and the brain's allowlist.
+export type AssistMode = Mode | "drift_paused";
 
 // Everything the router and the handlers need about the turn being routed. Built by /api/assist
 // from the request plus the already-loaded ledger.
@@ -19,6 +24,8 @@ export type OrchestratorInput = {
   state: AgentState; // the folded ledger for this room (source of the active decision)
   scope: string; // the session product area
   clarifyContext?: string; // rep-supplied context on a clarification re-ask
+  presetMode?: Mode; // skip the router and dispatch straight to this mode (the drift-resume path
+  // already spent a brain call deciding the mode, so the graph must not spend a second one)
 };
 
 export type ModeDecision = { mode: Mode; why: string };

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Stats } from "./console-types";
-import type { Mode } from "./agent/orchestrator/types";
+import type { AssistMode } from "./agent/orchestrator/types";
 import { lastFromCustomer, transcriptText, type Line } from "./transcript";
 
 // The live orchestrator path: on each substantive customer turn, ask the server what kind of help
@@ -42,7 +42,7 @@ export type PointerConsole = {
   result: Pointers | null;
   note: string | undefined;
   // The mode the orchestrator chose for the last turn — drives how the console renders it.
-  mode: Mode | null;
+  mode: AssistMode | null;
   // Set when the orchestrator needs the rep to supply context before it will answer.
   clarify: Clarify | null;
   loading: boolean;
@@ -75,7 +75,7 @@ export function usePointers({
 }): PointerConsole {
   const [result, setResult] = useState<Pointers | null>(null);
   const [note, setNote] = useState<string>();
-  const [mode, setMode] = useState<Mode | null>(null);
+  const [mode, setMode] = useState<AssistMode | null>(null);
   const [clarify, setClarify] = useState<Clarify | null>(null);
   const [loading, setLoading] = useState(false);
   const [used, setUsed] = useState<Set<string>>(new Set());
@@ -114,7 +114,7 @@ export function usePointers({
           }),
         });
         const data = await res.json();
-        setMode((data.mode as Mode) ?? null);
+        setMode((data.mode as AssistMode) ?? null);
 
         // The orchestrator wants context from the rep before it answers.
         if (data.mode === "clarification") {

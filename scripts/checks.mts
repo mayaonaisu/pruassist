@@ -17,12 +17,18 @@ import assert from "node:assert/strict";
 
 delete process.env.UPSTASH_REDIS_REST_URL;
 delete process.env.UPSTASH_REDIS_REST_TOKEN;
+// The drift-resume checks exercise the deterministic leg of judgePausedTurn, so the router brain
+// must be unconfigured here — otherwise .env.local (loaded by `npm run check`) would hand these
+// tests a live OpenRouter call.
+delete process.env.ORCHESTRATOR_BASE_URL;
+delete process.env.ORCHESTRATOR_MODEL;
+delete process.env.ORCHESTRATOR_API_KEY;
 
 const { CONCEPTS, conceptById, conceptsForArea } = await import("../src/lib/concepts.ts");
 const { scorePass } = await import("../src/lib/agent/score.ts");
 const { clauseById } = await import("../src/lib/knowledge.ts");
 const { applyActs, applyDetections, buildRecord, chooseAlert } = await import("../src/lib/agent/ledger.ts");
-const { rankByRisk } = await import("../src/lib/agent/lookahead.ts");
+const { rankByRisk, anchorClauses } = await import("../src/lib/agent/lookahead.ts");
 const { matchesLookahead } = await import("../src/lib/agent/cache.ts");
 const { isBareAssent, isQuestion } = await import("../src/lib/agent/utterance.ts");
 const { prepare, runSignals } = await import("../src/lib/agent/signals.ts");
@@ -35,6 +41,8 @@ const { activeDecision, readinessFor } = await import("../src/lib/agent/readines
 const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
 const { runOrchestrator } = await import("../src/lib/agent/orchestrator/graph.ts");
 const { handleGuider } = await import("../src/lib/agent/orchestrator/handlers.ts");
+const { DRIFT_PAUSE_AFTER, RESETS_DRIFT, loadDrift, recordDrift, clearDrift, judgePausedTurn } = await import("../src/lib/agent/orchestrator/drift.ts");
+const { fixTerms } = await import("../src/lib/terms.ts");
 
 type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
@@ -494,6 +502,110 @@ test("the LangGraph orchestrator compiles and the wake-gate short-circuits an ac
   const r = await runOrchestrator({ asked: "Okay, thanks.", transcript: "Customer: Okay, thanks.", state: emptyState("r", AREA), scope: AREA });
   assert.equal(r.mode, "keep_listening");
   assert.ok(!r.pointers);
+});
+
+test("a preset mode dispatches straight to its handler without the router", async () => {
+  // presetMode is the drift-resume path: the mode was already decided, so the graph must not
+  // classify again. keep_listening is a no-network handler, so this stays hermetic.
+  const r = await runOrchestrator({ asked: "How much is the deductible?", transcript: "Customer: How much is the deductible?", state: emptyState("r", AREA), scope: AREA, presetMode: "keep_listening" });
+  assert.equal(r.mode, "keep_listening");
+});
+
+/* ---------- topic-drift escalation (warn → pause → resume) ---------- */
+
+test("drift warns once, then pauses on the second consecutive drift", async () => {
+  const room = "drift-count";
+  await clearDrift(room);
+  const first = await recordDrift(room, await loadDrift(room));
+  assert.equal(first.count, 1);
+  assert.equal(first.pausedAt, null, "one drift is a warning, not a pause");
+  const second = await recordDrift(room, first);
+  assert.equal(second.count, DRIFT_PAUSE_AFTER);
+  assert.ok(second.pausedAt, "the second consecutive drift pauses");
+  assert.deepEqual(await loadDrift(room), second, "the streak round-trips through the store");
+});
+
+test("clearing drift returns to the zero state", async () => {
+  const room = "drift-clear";
+  await recordDrift(room, await recordDrift(room, await loadDrift(room)));
+  await clearDrift(room);
+  assert.deepEqual(await loadDrift(room), { count: 0, pausedAt: null });
+});
+
+test("only substantive result modes reset a drift streak", () => {
+  assert.ok(RESETS_DRIFT.has("policy_guidance"));
+  assert.ok(RESETS_DRIFT.has("comparison"));
+  assert.ok(RESETS_DRIFT.has("guider"));
+  assert.ok(RESETS_DRIFT.has("clarification"));
+  // A quiet turn must not grant amnesty to an off-topic streak.
+  assert.ok(!RESETS_DRIFT.has("keep_listening"));
+  assert.ok(!RESETS_DRIFT.has("topic_drift"));
+});
+
+test("while paused, an on-topic turn resumes (deterministic leg, no brain configured)", async () => {
+  // The brain env is deleted above, so judgePausedTurn falls to decideMode — proving the pause is
+  // never a dead end even when the router is down.
+  const question = await judgePausedTurn({ asked: "How much is the deductible?", transcript: "Customer: How much is the deductible?", state: emptyState("r", AREA), scope: AREA });
+  assert.deepEqual(question, { resume: "policy_guidance" });
+
+  const s = ledgerWith([["pro-ration", "asserted"], ["deductible-amounts", "asserted"]]);
+  const compare = await judgePausedTurn({ asked: "So which plan, Premier or Plus?", transcript: "Customer: So which plan, Premier or Plus?", state: s, scope: AREA });
+  assert.deepEqual(compare, { resume: "comparison" });
+});
+
+test("while paused, an off-topic statement stays paused and spends no model call", async () => {
+  // A fetch here would be the brain call; with the brain unconfigured judgePausedTurn must decide
+  // from the deterministic tier alone. The thrower proves nothing reached the network.
+  const realFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = (async () => {
+    fetches++;
+    throw new Error("no network in this test");
+  }) as typeof fetch;
+  try {
+    const verdict = await judgePausedTurn({ asked: "The traffic on the way here was terrible.", transcript: "Customer: The traffic on the way here was terrible.", state: emptyState("r", AREA), scope: AREA });
+    assert.deepEqual(verdict, { paused: true });
+    assert.equal(fetches, 0, "no brain call went out");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+/* ---------- transcript term correction ---------- */
+
+test("fixTerms rewrites mis-heard domain terms to canonical spelling", () => {
+  assert.equal(fixTerms("i want peru shield"), "i want PRUShield");
+  assert.equal(fixTerms("tell me about pru active protect"), "tell me about PRUActive Protect");
+  assert.equal(fixTerms("can i pay from medi save"), "can i pay from MediSave");
+  assert.equal(fixTerms("what about the co insurance"), "what about the co-insurance");
+});
+
+test("fixTerms canonicalizes product tiers, rider variants and PRUPanel Connect", () => {
+  // Multiword names must resolve before the bare product name (RULES sorts longest-alias-first).
+  assert.equal(fixTerms("is pru shield premier better than pru shield standard"), "is PRUShield Premier better than PRUShield Standard");
+  assert.equal(fixTerms("pru extra preferred care"), "PRUExtra Preferred Care");
+  assert.equal(fixTerms("use pool panel connect specialists"), "use PRUPanel Connect specialists");
+  assert.equal(fixTerms("pru active retirement two"), "PRUActive Retirement II");
+});
+
+test("fixTerms leaves ordinary speech untouched and is idempotent", () => {
+  const plain = "How much would I actually have to pay first?";
+  assert.equal(fixTerms(plain), plain);
+  const once = fixTerms("pru shield and pru extra");
+  assert.equal(once, "PRUShield and PRUExtra");
+  assert.equal(fixTerms(once), once, "a second pass changes nothing");
+});
+
+test("anchorClauses gives the lookahead a reliable, on-topic fallback when the tool loop gathers nothing", () => {
+  const panel = conceptById("panel-providers");
+  assert.ok(panel, "panel-providers concept exists");
+  const hits = anchorClauses(panel);
+  assert.ok(hits.length > 0, "the fallback is never empty");
+  assert.equal(hits.length, panel.clauseIds.length, "every anchor clause id resolves to a clause");
+  for (const h of hits) {
+    assert.ok(h.source && h.text, "each hit carries source and text for grounding and citation");
+    assert.equal(h.score, 1);
+  }
 });
 
 /* ---------- the scoring pass ---------- */

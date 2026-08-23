@@ -36,6 +36,9 @@ const HANDLERS: Record<Mode, (i: OrchestratorInput) => OrchestratorResult | Prom
 // deterministic tier 2.
 async function scopeCheck(state: typeof S.State): Promise<Partial<typeof S.State>> {
   const input = state.input;
+  // The caller already decided the mode (the drift-resume path spent its brain call there); honour
+  // it and skip the router so we don't pay for a second classification.
+  if (input.presetMode) return { mode: input.presetMode };
   const text = input.clarifyContext ? `${input.clarifyContext}\n${input.asked}` : input.asked;
   if (isBareAssent(text)) return { mode: "keep_listening" };
   const brain = await classify(input);

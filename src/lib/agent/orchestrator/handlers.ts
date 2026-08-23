@@ -1,18 +1,46 @@
 import { conceptsForArea } from "../../concepts";
 import { retrieve, type Hit } from "../../retrieval";
 import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "../gemini";
-import { clauseBlock, comparisonSystemInstruction, guidanceSystemInstruction, pointerSystemInstruction } from "../prompts";
+import { clauseBlock, comparisonSystemInstruction, guidanceSystemInstruction, HOUSE_RULES, pointerSystemInstruction, POSTURE } from "../prompts";
 import { activeDecision, readinessFor } from "../readiness";
+import { runToolLoop } from "../tools";
 import { conceptsMentioned } from "../utterance";
 import { unsupportedFigures } from "../verify";
 import type { OrchestratorInput, OrchestratorResult, Pointers } from "./types";
 
-// The mode handlers. The generating ones (policy / comparison / guider) reuse the exact
-// retrieve → generate → verify machinery the assist route used before the orchestrator existed;
-// the lighter ones return a payload the console renders without a model call.
+// The mode handlers. The generating ones (policy / comparison / guider) run the two-phase pattern:
+// an agentic tool loop gathers the evidence (the model decides what to search and whether to read
+// the ledger), then a structured generation writes the pointers over those clauses and the
+// deterministic figure check labels anything ungrounded. The lighter modes return a payload the
+// console renders without a model call.
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const sourcesOf = (hits: Hit[]) => hits.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) }));
+
+const NO_CLAUSE_NOTE = "No policy clause covers this yet — keep listening, or ask the customer to be more specific.";
+const RATE_LIMIT_NOTE = "The AI service is rate limited right now — try again in a moment.";
+
+const GATHER_INSTRUCTION =
+  `${POSTURE} ${HOUSE_RULES} The representative needs to answer the customer's latest turn. You MUST ` +
+  `call search_policy at least once — never stop without searching first — for the clauses that ` +
+  `answer it, and read the ledger only if it helps you decide what to look up. Gather the clauses, ` +
+  `then stop — do not write the reply itself.`;
+
+// Phase 1 of the generating path: let the model choose what to retrieve. Falls back to the plain
+// deterministic retrieve the handlers used before — a null loop (no Gemini key) or an empty gather
+// must never leave the rep with nothing when a straight lookup would have found a clause.
+async function gatherClauses(input: OrchestratorInput, hint?: string): Promise<Hit[]> {
+  const gathered = await runToolLoop(
+    GATHER_INSTRUCTION,
+    `The representative is discussing ${input.scope}.${hint ? ` ${hint}` : ""} Recent conversation:\n` +
+      `${input.transcript}\n\nGather the clauses that answer the customer's latest turn, then stop.`,
+    { state: input.state, productArea: input.scope },
+    // Live path: rotate keys under a rate limit, never sleep — the rep is waiting inside maxDuration.
+    { allowSleep: false },
+  );
+  if (gathered && gathered.run.cited.length) return gathered.run.cited;
+  return retrieve(input.transcript, 3, input.scope);
+}
 
 async function generate(
   instruction: string,
@@ -56,27 +84,28 @@ async function generate(
   return { pointers, unsupportedFigures: unsupportedFigures(spoken, hits) };
 }
 
-export async function handlePolicyGuidance(input: OrchestratorInput): Promise<OrchestratorResult> {
-  const hits = await retrieve(input.transcript, 3, input.scope);
-  if (!hits.length) {
-    return { mode: "policy_guidance", note: "No policy clause covers this yet — keep listening, or ask the customer to be more specific." };
-  }
+export async function handlePolicyGuidance(input: OrchestratorInput, preGathered?: Hit[]): Promise<OrchestratorResult> {
+  // preGathered lets the comparison handler reuse the clauses it already gathered instead of paying
+  // for a second tool loop; the graph calls this with one argument, so it gathers for itself.
+  const hits = preGathered ?? (await gatherClauses(input));
+  if (!hits.length) return { mode: "policy_guidance", note: NO_CLAUSE_NOTE };
   const gen = await generate(pointerSystemInstruction(input.scope), hits, input.transcript);
-  if (!gen) return { mode: "policy_guidance", note: "The AI service is rate limited right now — try again in a moment." };
+  if (!gen) return { mode: "policy_guidance", note: RATE_LIMIT_NOTE };
   return { mode: "policy_guidance", pointers: gen.pointers, sources: sourcesOf(hits), unsupportedFigures: gen.unsupportedFigures };
 }
 
 export async function handleComparison(input: OrchestratorInput): Promise<OrchestratorResult> {
   const decision = activeDecision(input.state);
-  const hits = await retrieve(input.transcript, 3, input.scope);
-  // No clauses or no active decision — fall back to a plain grounded answer rather than nothing.
-  if (!hits.length || !decision) return handlePolicyGuidance(input);
+  const hits = await gatherClauses(input, decision ? `The customer is weighing: ${decision.question}` : undefined);
+  // No clauses or no active decision — fall back to a plain grounded answer, reusing what we
+  // gathered rather than running the tool loop again.
+  if (!hits.length || !decision) return handlePolicyGuidance(input, hits);
   const gen = await generate(
     comparisonSystemInstruction(decision, readinessFor(decision, input.state), input.scope),
     hits,
     input.transcript,
   );
-  if (!gen) return { mode: "comparison", note: "The AI service is rate limited right now — try again in a moment." };
+  if (!gen) return { mode: "comparison", note: RATE_LIMIT_NOTE };
   return {
     mode: "comparison",
     pointers: gen.pointers,

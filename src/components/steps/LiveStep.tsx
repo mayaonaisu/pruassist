@@ -292,6 +292,15 @@ function LiveConsole({
             </div>
             <div className="concern">{pointers.note}</div>
           </div>
+        ) : pointers.mode === "drift_paused" && pointers.note ? (
+          // Drifted twice: paused. No model call went out for this turn; it resumes on the first
+          // on-topic turn.
+          <div className="pru-enter paused">
+            <div className="lb-head">
+              <span className="cat">Paused · off topic</span>
+            </div>
+            <div className="concern">{pointers.note}</div>
+          </div>
         ) : !result ? (
           <>
             <div className="lb-head">

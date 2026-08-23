@@ -14,7 +14,8 @@ import {
 } from "@livekit/components-react";
 import { RoomEvent, Track } from "livekit-client";
 import "@livekit/components-styles";
-import { useBrowserSpeech } from "@/lib/useBrowserSpeech";
+import { useBrowserSpeech, type SpeechResult } from "@/lib/useBrowserSpeech";
+import { deepgramEnabled, useDeepgramSpeech } from "@/lib/useDeepgramSpeech";
 import { IconCheck, IconX } from "@/components/icons";
 
 type Info = { active: boolean; repName: string; productArea: string };
@@ -95,7 +96,7 @@ export default function CustomerPage() {
           style={{ height: "100%" }}
         >
           <RoomAudioRenderer />
-          <CustomerStage name={choices.username} />
+          <CustomerStage name={choices.username} joinToken={token} />
         </LiveKitRoom>
       </div>
     );
@@ -180,7 +181,7 @@ export default function CustomerPage() {
   );
 }
 
-function CustomerStage({ name }: { name: string }) {
+function CustomerStage({ name, joinToken }: { name: string; joinToken: string }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
 
@@ -210,16 +211,25 @@ function CustomerStage({ name }: { name: string }) {
   const micOn = room?.localParticipant?.isMicrophoneEnabled ?? false;
   const camOn = room?.localParticipant?.isCameraEnabled ?? false;
 
-  // Transcribe the customer's own speech only while their mic is on, streamed to the rep.
-  useBrowserSpeech(micOn, ({ final, interim }) => {
-    if (!room) return;
-    const payload = { type: "transcript", role: "Customer", name: name || "Customer", final: final || null, interim: interim || null };
-    try {
-      room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(payload)), { reliable: true });
-    } catch {
-      /* ignore */
-    }
-  });
+  // Transcribe the customer's own speech only while their mic is on, streamed to the rep. Deepgram
+  // (with brand-term boosting) when enabled and working; otherwise the browser recognizer. Both
+  // hooks are always called; each no-ops unless its enabled flag is true.
+  const publish = useCallback(
+    ({ final, interim }: SpeechResult) => {
+      if (!room) return;
+      const payload = { type: "transcript", role: "Customer", name: name || "Customer", final: final || null, interim: interim || null };
+      try {
+        room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(payload)), { reliable: true });
+      } catch {
+        /* ignore */
+      }
+    },
+    [room, name],
+  );
+  const wantDeepgram = deepgramEnabled();
+  const dgStatus = useDeepgramSpeech(micOn && wantDeepgram, publish, joinToken);
+  const deepgramDown = dgStatus === "unconfigured" || dgStatus === "error";
+  useBrowserSpeech(micOn && (!wantDeepgram || deepgramDown), publish);
 
   const toggleMic = () => {
     const lp = room?.localParticipant;

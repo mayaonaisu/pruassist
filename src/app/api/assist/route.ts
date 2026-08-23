@@ -4,6 +4,16 @@ import { getByRoom } from "@/lib/sessions";
 import { loadState } from "@/lib/agent/ledger";
 import { matchesLookahead } from "@/lib/agent/cache";
 import { runOrchestrator } from "@/lib/agent/orchestrator/graph";
+import {
+  clearDrift,
+  judgePausedTurn,
+  loadDrift,
+  pausedMessage,
+  recordDrift,
+  RESETS_DRIFT,
+  type DriftState,
+} from "@/lib/agent/orchestrator/drift";
+import type { Mode, OrchestratorInput } from "@/lib/agent/orchestrator/types";
 import { emptyState } from "@/lib/agent/types";
 
 export const runtime = "nodejs";
@@ -28,17 +38,49 @@ export async function POST(req: NextRequest) {
   }
 
   // roomId is optional on purpose: a tab left open from an earlier session must not start failing
-  // mid-demo. Without it there is no product area and no prepared answer.
-  const session = typeof roomId === "string" && roomId ? await getByRoom(roomId) : null;
+  // mid-demo. Without it there is no product area, no prepared answer, and no drift state.
+  const rid = typeof roomId === "string" && roomId ? roomId : null;
+  const session = rid ? await getByRoom(rid) : null;
   const productArea = session?.context.productArea;
-  const state = session ? await loadState(roomId, session.context.productArea) : null;
+  const state = session && rid ? await loadState(rid, session.context.productArea) : null;
 
-  // 0) CACHE — did the background pass already prepare, and verify, the answer to this question?
+  const scope = productArea ?? "Health Protection";
+  const orchState = state ?? emptyState(rid ?? "anon", scope);
+  const orchInput: OrchestratorInput = {
+    asked: typeof asked === "string" ? asked : "",
+    transcript,
+    state: orchState,
+    scope,
+    clarifyContext: typeof clarifyContext === "string" && clarifyContext.trim() ? clarifyContext : undefined,
+  };
+
+  // 0) DRIFT — if the conversation is paused for drifting off scope, judge whether this turn brings
+  // it back (one brain call, no Gemini) before spending anything else. Paused means paused: the
+  // cache is skipped too. Only a real session gets a drift streak; a stale/anon tab bypasses it.
+  const driftRoom = session ? rid : null;
+  let presetMode: Mode | undefined;
+  let drift: DriftState = { count: 0, pausedAt: null };
+  if (driftRoom) {
+    drift = await loadDrift(driftRoom);
+    if (drift.pausedAt) {
+      const verdict = await judgePausedTurn(orchInput);
+      if ("resume" in verdict) {
+        await clearDrift(driftRoom);
+        presetMode = verdict.resume; // skip the graph's router: judgePausedTurn already classified
+      } else {
+        return NextResponse.json({ mode: "drift_paused", note: pausedMessage(scope) });
+      }
+    }
+  }
+
+  // 1) CACHE — did the background pass already prepare, and verify, the answer to this question?
   if (state) {
     const question = typeof asked === "string" && asked.trim() ? asked : (transcript.split("\n").slice(-1)[0] ?? "");
     const check = await matchesLookahead(state.lookahead, question);
     if (check.hit && state.lookahead) {
       const l = state.lookahead;
+      // A served answer is an in-scope turn — end any drift streak.
+      if (driftRoom && drift.count > 0) await clearDrift(driftRoom);
       return NextResponse.json({
         mode: "policy_guidance",
         ...l.pointers,
@@ -53,19 +95,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 1) ORCHESTRATE — the brain (or the deterministic fallback) decides the mode; LangGraph routes
+  // 2) ORCHESTRATE — the brain (or the deterministic fallback) decides the mode; LangGraph routes
   // to the matching handler. The safety spine (readiness) is not here — it rides the state poll.
-  const scope = productArea ?? "Health Protection";
-  const orchState = state ?? emptyState(typeof roomId === "string" && roomId ? roomId : "anon", scope);
-  const result = await runOrchestrator({
-    asked: typeof asked === "string" ? asked : "",
-    transcript,
-    state: orchState,
-    scope,
-    clarifyContext: typeof clarifyContext === "string" && clarifyContext.trim() ? clarifyContext : undefined,
-  });
+  const result = await runOrchestrator({ ...orchInput, presetMode });
 
-  // 2) MAP the mode result onto the response the console renders.
+  // 3) DRIFT bookkeeping — a substantive answer ends the streak; a repeat drift advances it and
+  // pauses on the second consecutive one. keep_listening leaves the streak untouched.
+  if (driftRoom) {
+    if (RESETS_DRIFT.has(result.mode)) {
+      if (drift.count > 0) await clearDrift(driftRoom);
+    } else if (result.mode === "topic_drift") {
+      const next = await recordDrift(driftRoom, drift);
+      if (next.pausedAt) return NextResponse.json({ mode: "drift_paused", note: pausedMessage(scope) });
+      // else this is the first drift — fall through to the one-time warning below.
+    }
+  }
+
+  // 4) MAP the mode result onto the response the console renders.
   if (result.mode === "keep_listening") {
     return NextResponse.json({ mode: result.mode, note: null });
   }

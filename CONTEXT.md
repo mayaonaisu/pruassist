@@ -143,10 +143,32 @@ failing — no key, a timeout, or non-JSON output falls through to the next tier
 
 The orchestrator decides *how to help this turn*; it never decides *whether a recommendation is
 safe* — that stays with the deterministic **Readiness** spine on the state poll. The generating
-modes (policy / comparison / guider) reuse the same retrieve → generate → grounding-check machinery
-the assist route always used; `guider` spends a model call only when the remark names a concept —
-so its benefits can be grounded — and stays quiet (no retrieval, no generation) otherwise, to keep
-the generalized trigger from burning generation quota.
+modes (policy / comparison) run the two-phase agentic path — a bounded tool loop
+([`tools.ts`](src/lib/agent/tools.ts), ≤3 steps) lets the model choose what to search and whether to
+read the ledger, then a structured generation writes the pointers over exactly those clauses and the
+same grounding-check labels anything ungrounded; both fall back to a plain retrieve if the loop
+returns nothing. `guider` stays a single grounded call and only when the remark names a concept —
+so its benefits can be grounded — and stays quiet (no retrieval, no generation) otherwise.
+
+**Topic drift escalates.** The first drift-routed turn warns; a second consecutive drift **pauses**
+the assist surface ([`drift.ts`](src/lib/agent/orchestrator/drift.ts), state in `sess:drift:<room>`,
+separate from the ledger key so it never races the deep pass). While paused, a turn costs one brain
+call and no Gemini: the brain judges whether the talk is back on scope (the deterministic tier stands
+in when the brain is down — a question resumes, a bare off-topic statement does not), and the first
+in-scope turn resumes the full pipeline. No rep action needed.
+
+**Transcript terms** are corrected before anything reads them: the browser transcriber mishears
+"PRUShield" as "pru shield" or "peru shield", so [`terms.ts`](src/lib/terms.ts) rewrites known
+aliases to canonical spellings in `useTranscript`, fixing display, the guider's concept gate,
+retrieval, and the detectors in one pass.
+
+Optionally, **Deepgram** replaces the browser recognizer for accuracy at the source: keyterm
+boosting recognises the brand vocabulary at decode time rather than repairing it after. It is opt-in
+(`NEXT_PUBLIC_ENABLE_DEEPGRAM`) and degrades open — [`useDeepgramSpeech`](src/lib/useDeepgramSpeech.ts)
+streams the mic to Deepgram with a short-lived token minted by [`/api/deepgram/token`](src/app/api/deepgram/token/route.ts)
+(the real key never reaches the browser; it must be Owner-scoped to grant tokens), and both the rep
+and customer sides fall back to Web Speech if it is unconfigured or errors. `terms.ts` still runs as
+the backstop over whatever STT is active.
 
 ## Teach-back
 
@@ -166,6 +188,11 @@ arrives, `/api/assist` serves it with no model call.
 Aimed at *this* customer's unresolved concepts, which is what separates it from predicting a
 generic next question. An answer that fails verification is dropped rather than cached: served
 instantly and with a citation, an ungrounded answer is worse than a cache miss.
+
+The tool loop occasionally returns without searching, gathering no clauses. Rather than skip
+preparing, the pass then retrieves the target concept's clauses directly (and its anchor clauses as
+a last resort), so the prepared answer is reliable instead of intermittently empty — `anchorClauses`
+in [`lookahead.ts`](src/lib/agent/lookahead.ts).
 
 ## Grounding
 

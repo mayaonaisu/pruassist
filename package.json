@@ -10,6 +10,7 @@
     "replay": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/replay.mts",
     "replay:all": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/replay.mts fixtures/false-assent.json fixtures/panel-misconception.json fixtures/re-ask.json fixtures/explain-back.json fixtures/teach-back-correct.json fixtures/teach-back-partial.json fixtures/off-topic.json fixtures/tier-decision.json",
     "check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs --test scripts/checks.mts",
+    "stt:check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/stt-check.mts",
     "e2e": "node --env-file-if-exists=.env.local scripts/e2e.mjs",
     "drive": "node --env-file-if-exists=.env.local scripts/drive.mjs"
   },

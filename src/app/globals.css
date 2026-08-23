@@ -645,6 +645,13 @@ button {
 .line-block .drift .cat {
   color: var(--marker-ink);
 }
+/* Paused reads a notch more serious than a first-time drift warning: the assistant has stopped. */
+.line-block .paused .cat {
+  color: var(--pru);
+}
+.line-block .paused .concern {
+  color: var(--pencil);
+}
 .clarify-form {
   display: flex;
   gap: 8px;
