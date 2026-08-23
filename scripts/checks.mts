@@ -42,7 +42,7 @@ const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await im
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
 const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
 const { runOrchestrator } = await import("../src/lib/agent/orchestrator/graph.ts");
-const { handleGuider } = await import("../src/lib/agent/orchestrator/handlers.ts");
+const { handleGuider, agenticLiveEnabled } = await import("../src/lib/agent/orchestrator/handlers.ts");
 const { DRIFT_PAUSE_AFTER, RESETS_DRIFT, loadDrift, recordDrift, clearDrift, judgePausedTurn } = await import("../src/lib/agent/orchestrator/drift.ts");
 const { fixTerms } = await import("../src/lib/terms.ts");
 
@@ -488,6 +488,40 @@ test("router: an in-scope question routes to policy guidance", () => {
 test("router: the deterministic tier leaves a bare statement at keep_listening", () => {
   // guider is an LLM-brain mode; with the brain down the safe fallback is silence, not a guess.
   assert.equal(decideMode(routerInput("I really like PRUShield.")).mode, "keep_listening");
+});
+
+test("router: a clearly off-scope statement is flagged as drift, even with the brain down", () => {
+  // The deterministic tier used to stay silent on drift; a high-precision off-domain cue now catches
+  // it, so drift no longer depends solely on the LLM brain classifying it.
+  assert.equal(decideMode(routerInput("The weather has been really hot lately.")).mode, "topic_drift");
+  assert.equal(decideMode(routerInput("Did you catch the football last night?")).mode, "topic_drift");
+});
+
+test("router: finance chatter is off-scope in Health Protection, but not in a scope where it belongs", () => {
+  assert.equal(decideMode(routerInput("Can I invest in stocks with this instead?")).mode, "topic_drift");
+  // In a Retirement scope, investing is on-topic — only the universal social cues apply there.
+  const inRetirement = { asked: "Can I invest more each month?", transcript: "Can I invest more each month?", state: emptyState("r", "Retirement"), scope: "Retirement" };
+  assert.notEqual(decideMode(inRetirement).mode, "topic_drift");
+});
+
+test("router: an off-domain word alongside an in-scope concept is not drift", () => {
+  // Names the deductible — a policy question that happens to mention investing, not a drift.
+  assert.notEqual(decideMode(routerInput("Is paying the deductible like investing my money?")).mode, "topic_drift");
+  // And a plain in-scope question is never mistaken for drift.
+  assert.equal(decideMode(routerInput("How much is the deductible?")).mode, "policy_guidance");
+});
+
+test("the agentic live path is on by default and off only when explicitly disabled", () => {
+  // The quota safety valve: with it off, the live handlers use the cheap single-retrieve path.
+  const prior = process.env.PRUASSIST_AGENTIC_LIVE;
+  delete process.env.PRUASSIST_AGENTIC_LIVE;
+  assert.equal(agenticLiveEnabled(), true, "default on");
+  process.env.PRUASSIST_AGENTIC_LIVE = "0";
+  assert.equal(agenticLiveEnabled(), false, "0 disables the tool loop on the live path");
+  process.env.PRUASSIST_AGENTIC_LIVE = "1";
+  assert.equal(agenticLiveEnabled(), true);
+  if (prior === undefined) delete process.env.PRUASSIST_AGENTIC_LIVE;
+  else process.env.PRUASSIST_AGENTIC_LIVE = prior;
 });
 
 test("guider spends no model call when the remark names no concept", async () => {

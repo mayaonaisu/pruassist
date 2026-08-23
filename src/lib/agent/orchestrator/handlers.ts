@@ -26,10 +26,16 @@ const GATHER_INSTRUCTION =
   `answer it, and read the ledger only if it helps you decide what to look up. Gather the clauses, ` +
   `then stop — do not write the reply itself.`;
 
+// The agentic live path is on by default; PRUASSIST_AGENTIC_LIVE=0 turns the tool loop off and the
+// live handlers fall back to a single retrieve — a quota safety valve, since the tool loop spends
+// several model calls per turn where a plain retrieve spends one.
+export const agenticLiveEnabled = (): boolean => process.env.PRUASSIST_AGENTIC_LIVE !== "0";
+
 // Phase 1 of the generating path: let the model choose what to retrieve. Falls back to the plain
-// deterministic retrieve the handlers used before — a null loop (no Gemini key) or an empty gather
-// must never leave the rep with nothing when a straight lookup would have found a clause.
+// deterministic retrieve the handlers used before — the flag being off, a null loop (no Gemini key),
+// or an empty gather must never leave the rep with nothing when a straight lookup would have found one.
 async function gatherClauses(input: OrchestratorInput, hint?: string): Promise<Hit[]> {
+  if (!agenticLiveEnabled()) return retrieve(input.transcript, 3, input.scope);
   const gathered = await runToolLoop(
     GATHER_INSTRUCTION,
     `The representative is discussing ${input.scope}.${hint ? ` ${hint}` : ""} Recent conversation:\n` +

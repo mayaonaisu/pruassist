@@ -139,7 +139,11 @@ The decision node (`scopeCheck`) has three tiers: an LLM **brain** (NVIDIA Nemot
 over the OpenAI-compatible OpenRouter endpoint, `ORCHESTRATOR_*` env), a deterministic `decideMode`
 ([`modes.ts`](src/lib/agent/orchestrator/modes.ts)) as the fallback and offline oracle, and a cheap
 wake-gate that never spends a brain call on a bare acknowledgement. Every tier degrades rather than
-failing — no key, a timeout, or non-JSON output falls through to the next tier.
+failing — no key, a timeout, or non-JSON output falls through to the next tier. Topic drift no longer
+depends solely on the brain: `looksOffScope` ([`modes.ts`](src/lib/agent/orchestrator/modes.ts)) is a
+high-precision, model-free backstop (an off-domain cue, no in-scope concept, not comparative) that
+`scopeCheck` also applies as an override, so a clearly off-scope turn is caught even when the brain
+misses it or is down.
 
 The orchestrator decides *how to help this turn*; it never decides *whether a recommendation is
 safe* — that stays with the deterministic **Readiness** spine on the state poll. The generating
@@ -147,7 +151,8 @@ modes (policy / comparison) run the two-phase agentic path — a bounded tool lo
 ([`tools.ts`](src/lib/agent/tools.ts), ≤3 steps) lets the model choose what to search and whether to
 read the ledger, then a structured generation writes the pointers over exactly those clauses and the
 same grounding-check labels anything ungrounded; both fall back to a plain retrieve if the loop
-returns nothing. `guider` stays a single grounded call and only when the remark names a concept —
+returns nothing (or if `PRUASSIST_AGENTIC_LIVE=0`, a quota valve that skips the loop entirely).
+`guider` stays a single grounded call and only when the remark names a concept —
 so its benefits can be grounded — and stays quiet (no retrieval, no generation) otherwise.
 
 **Topic drift escalates.** The first drift-routed turn warns; a second consecutive drift **pauses**

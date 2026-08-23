@@ -9,7 +9,7 @@ import {
   handlePolicyGuidance,
   handleTopicDrift,
 } from "./handlers";
-import { decideMode } from "./modes";
+import { decideMode, looksOffScope } from "./modes";
 import type { Mode, OrchestratorInput, OrchestratorResult } from "./types";
 
 // The orchestrator as a LangGraph StateGraph: one scopeCheck node (the brain) decides the mode,
@@ -42,7 +42,11 @@ async function scopeCheck(state: typeof S.State): Promise<Partial<typeof S.State
   const text = input.clarifyContext ? `${input.clarifyContext}\n${input.asked}` : input.asked;
   if (isBareAssent(text)) return { mode: "keep_listening" };
   const brain = await classify(input);
-  return { mode: brain?.mode ?? decideMode(input).mode };
+  const mode = brain?.mode ?? decideMode(input).mode;
+  // Backstop the brain: a clearly off-scope turn is drift even if the brain classified it otherwise.
+  // High-precision (off-domain cue, no in-scope concept, not comparative), so overriding is safe.
+  if (mode !== "topic_drift" && looksOffScope(input)) return { mode: "topic_drift" };
+  return { mode };
 }
 
 function dispatch(mode: Mode) {
