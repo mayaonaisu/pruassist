@@ -216,6 +216,7 @@ if (prepared.prepared) {
   check("the prepared question is served from cache", hit.data.cached === true, `${hit.ms}ms`);
   check("the served answer was grounding-verified before caching", hit.data.verified === true);
   check("the served answer has a line to say", Boolean(hit.data.suggestedLine));
+  check("assist tags the response with an orchestrator mode", typeof hit.data.mode === "string", hit.data.mode);
 
   const miss = await ask("Can I pay the premium from MediSave?");
   check("an unrelated question is not served from cache", miss.data.cached !== true, `${miss.ms}ms`);

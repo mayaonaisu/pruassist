@@ -128,6 +128,24 @@ ready, and the single question most worth asking next.
 not agreed to. It is a pure projection of the ledger, deliberately: whether a recommendation is
 safe to make is not a judgement to hand a model.
 
+## Orchestrator
+
+The agentic front door on the live path, in
+[`src/lib/agent/orchestrator/`](src/lib/agent/orchestrator). On each substantive customer turn it
+decides a **mode** — keep-listening, policy guidance, comparison, guider, topic drift, or
+clarification — and a LangGraph routes to the handler for it.
+
+The decision node (`scopeCheck`) has three tiers: an LLM **brain** (NVIDIA Nemotron 3.5 Lightning
+over the OpenAI-compatible OpenRouter endpoint, `ORCHESTRATOR_*` env), a deterministic `decideMode`
+([`modes.ts`](src/lib/agent/orchestrator/modes.ts)) as the fallback and offline oracle, and a cheap
+wake-gate that never spends a brain call on a bare acknowledgement. Every tier degrades rather than
+failing — no key, a timeout, or non-JSON output falls through to the next tier.
+
+The orchestrator decides *how to help this turn*; it never decides *whether a recommendation is
+safe* — that stays with the deterministic **Readiness** spine on the state poll. The generating
+modes (policy / comparison / guider) reuse the same retrieve → generate → grounding-check machinery
+the assist route always used; `guider` retrieves only when its pointer cites policy facts.
+
 ## Teach-back
 
 The question that would settle a concept, authored per concept — "if your bill came to S$8,000 at a

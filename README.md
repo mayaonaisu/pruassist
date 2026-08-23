@@ -194,6 +194,20 @@ handed that same standing and required to name what is not yet settled. A clean 
 be the easy answer and the wrong one — it would lead the representative to recommend on a dimension
 the customer has never shown they understand.
 
+### The agentic orchestrator
+
+On the live path, an orchestrator ([`src/lib/agent/orchestrator/`](src/lib/agent/orchestrator))
+decides, each substantive customer turn, *what kind of help* the rep needs — keep-listening, a policy
+answer, a comparison, a proactive guider nudge, a topic-drift warning, or a clarification prompt — and
+a LangGraph routes to the handler for it. The decider is three-tiered: an LLM brain (NVIDIA Nemotron
+3.5 Lightning via OpenRouter, `ORCHESTRATOR_*` in `.env.local`), a deterministic router as the fallback
+and offline oracle, and a wake-gate that never spends a model call on a bare "okay, thanks". It degrades
+instead of failing — no key or a timeout drops to the deterministic router.
+
+Crucially the orchestrator only decides *how to help*; *whether a recommendation is safe* stays with the
+deterministic readiness spine on the state poll. Agentic where autonomy helps, deterministic where trust
+must not move.
+
 ### Running it without a browser
 
 The ledger has its own development loop — a scripted two-speaker transcript fed through the real
