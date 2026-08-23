@@ -42,7 +42,9 @@ export const JSON_BUDGET = 1600;
 export function thinking(mode: "off" | "dynamic"): ThinkingConfig {
   const legacyBudget = /^gemini-2\./.test(MODEL);
   if (legacyBudget) return { thinkingBudget: mode === "off" ? 0 : -1 };
-  return { thinkingLevel: mode === "off" ? ThinkingLevel.MINIMAL : ThinkingLevel.MEDIUM };
+  // LOW rather than MINIMAL for "off": some 3.x models (e.g. the gemini-flash-latest alias) reject
+  // MINIMAL with a 400, while LOW is accepted across the whole 3.x line and is still barely-thinking.
+  return { thinkingLevel: mode === "off" ? ThinkingLevel.LOW : ThinkingLevel.MEDIUM };
 }
 
 // Counted per invocation, not globally: the deep pass resets it, does its work, and folds the
