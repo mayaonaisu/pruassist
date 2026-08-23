@@ -4,6 +4,8 @@ import { currentRep } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// A model call to write the brief can run past Vercel's default 10s limit on a long session.
+export const maxDuration = 30;
 
 const MODEL = "gemini-2.5-flash";
 
