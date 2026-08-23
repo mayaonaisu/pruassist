@@ -1,6 +1,6 @@
 "use client";
 
-import { ParticipantTile, useTracks } from "@livekit/components-react";
+import { ParticipantTile, useRemoteParticipants, useTracks } from "@livekit/components-react";
 import { Track } from "livekit-client";
 import type { DeviceStatus, useLocalMedia } from "@/lib/useLocalMedia";
 
@@ -11,12 +11,17 @@ export function Faces({ media }: { media: ReturnType<typeof useLocalMedia> }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const local = tracks.find((t) => t.participant.isLocal);
   const remotes = tracks.filter((t) => !t.participant.isLocal);
+  // Presence separate from video: a customer who is in the room with their camera off should read
+  // as "connected", not "waiting" — otherwise a camera-off customer looks like no customer at all.
+  const remotePeople = useRemoteParticipants();
 
   return (
     <div className="cams" data-lk-theme="default">
       {remotes.length === 0 ? (
         <div className="cam">
-          <div className="cam-face">waiting for the customer…</div>
+          <div className="cam-face">
+            {remotePeople.length > 0 ? "customer connected — camera off" : "waiting for the customer…"}
+          </div>
           <span className="cam-tag">CUSTOMER</span>
         </div>
       ) : (
