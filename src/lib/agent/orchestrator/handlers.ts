@@ -42,7 +42,9 @@ async function gatherClauses(input: OrchestratorInput, hint?: string): Promise<H
       `${input.transcript}\n\nGather the clauses that answer the customer's latest turn, then stop.`,
     { state: input.state, productArea: input.scope },
     // Live path: rotate keys under a rate limit, never sleep — the rep is waiting inside maxDuration.
-    { allowSleep: false },
+    // Cap the loop tighter than the background lookahead so a live turn can't stack enough sequential
+    // model calls to blow the function budget (a full 3-step loop + synthesis was hitting a 504).
+    { allowSleep: false, maxSteps: 2 },
   );
   if (gathered && gathered.run.cited.length) return gathered.run.cited;
   return retrieve(input.transcript, 3, input.scope);

@@ -18,10 +18,11 @@ import { emptyState } from "@/lib/agent/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// The orchestrator can stack a brain call, retrieval, and a generation on a cache miss, which can
-// exceed Vercel's default 10s function limit. Give the live path headroom so serverless does not
-// kill a slow-but-valid answer; a cache hit still returns in well under a second.
-export const maxDuration = 30;
+// The orchestrator can stack a brain call, a bounded tool loop, and a generation on a cache miss,
+// which can exceed Vercel's default 10s function limit. Give the live path real headroom so
+// serverless does not 504 a slow-but-valid agentic answer; a cache hit still returns in well under
+// a second, and the live tool loop is capped (handlers.ts) to keep the common case far below this.
+export const maxDuration = 60;
 
 // The live path, and the front door of the orchestrator. The cache short-circuit stays first (a
 // prepared answer costs no model call); on a miss the LangGraph orchestrator decides the mode and

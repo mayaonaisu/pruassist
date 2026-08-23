@@ -121,17 +121,17 @@ export async function runToolLoop(
   instruction: string,
   task: string,
   ctx: ToolContext,
-  // The live path passes allowSleep:false: the rep is waiting and maxDuration is 30s, so a
-  // rate-limited call must rotate keys, never sleep out a 20s backoff. Background callers leave it
-  // true — a lookahead held open a little longer is fine.
-  { allowSleep = true } = {},
+  // allowSleep:false is for the live path — the rep is waiting, so a rate-limited call rotates keys
+  // rather than sleeping out a backoff. maxSteps bounds latency: the background lookahead can afford
+  // the full loop, but the live handlers cap it so a rep never waits on three sequential model calls.
+  { allowSleep = true, maxSteps = MAX_TOOL_STEPS } = {},
 ): Promise<{ text: string; run: ToolRun } | null> {
   if (!haveKey()) return null;
 
   const contents: Content[] = [{ role: "user", parts: [{ text: task }] }];
   const run: ToolRun = { cited: [], steps: 0, transcript: [] };
 
-  for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+  for (let step = 0; step < Math.min(maxSteps, MAX_TOOL_STEPS); step++) {
     const res = await callWithRetry(
       "tools",
       (ai) =>

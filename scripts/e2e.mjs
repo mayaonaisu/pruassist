@@ -171,7 +171,9 @@ const assist = async (asked) => {
     headers: H,
     body: JSON.stringify({ roomId: session.roomId, transcript: `Bryan Eng: Let's stay on your hospital cover.\nCustomer: ${asked}`, asked }),
   });
-  return res.json();
+  // A 504 (a slow agentic turn over maxDuration) returns non-JSON; degrade to a check failure, not
+  // an unhandled crash that silently ends the whole suite.
+  return res.json().catch(() => ({ mode: `<HTTP ${res.status}>` }));
 };
 
 const drift1 = await assist("Can I invest with this, like buying shares?");
@@ -236,7 +238,7 @@ if (prepared.prepared) {
       headers: H,
       body: JSON.stringify({ roomId: lookSession.roomId, transcript: `Bryan Eng: Let me explain.\nCustomer: ${asked}`, asked }),
     });
-    return { data: await res.json(), ms: Date.now() - started };
+    return { data: await res.json().catch(() => ({ mode: `<HTTP ${res.status}>` })), ms: Date.now() - started };
   };
 
   const hit = await ask(prepared.prepared.question);
