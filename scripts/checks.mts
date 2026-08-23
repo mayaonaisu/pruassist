@@ -659,6 +659,24 @@ test("callWithRetry rotates past an invalid-key 400 instead of failing the whole
   resetPool();
 });
 
+test("callWithRetry rotates past a transient 503 on the live path (no sleeping) instead of failing", async () => {
+  // A busy model returns 503 UNAVAILABLE on some keys. On the live path (allowSleep:false) that must
+  // rotate to a free key immediately, not die — otherwise one busy key rate-limit-notes the rep.
+  let calls = 0;
+  const r = await callWithRetry(
+    "test-503",
+    async () => {
+      calls++;
+      if (calls === 1) throw Object.assign(new Error("503 The model is overloaded. Please try again later."), { status: 503 });
+      return "ok";
+    },
+    { allowSleep: false },
+  );
+  assert.equal(r, "ok", "rotated past the 503 to a healthy key");
+  assert.ok(calls >= 2, "the call was retried on a different key");
+  resetPool();
+});
+
 /* ---------- the compliance record export (the suitability trail) ---------- */
 
 const CR_META = { productArea: AREA, signedBy: "Nikole Tan", customerName: "Mr Lim", durationMin: 18 };

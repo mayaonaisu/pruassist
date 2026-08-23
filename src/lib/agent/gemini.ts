@@ -95,7 +95,10 @@ export async function callWithRetry<T>(
       }
       if (status && TRANSIENT_STATUS.includes(status)) {
         const cool = cooldownFor(e);
-        if (status === 429 && rotateAfterRateLimit(cool)) continue;
+        // Rotate to a free key for BOTH 429 (quota) and 503 (model busy): the live path can't sleep,
+        // so a busy key must be skipped immediately rather than fail the call. Sleeping is the last
+        // resort, only when every key is cooling and the caller allows it.
+        if (rotateAfterRateLimit(cool)) continue;
         if (allowSleep && !slept && cool <= MAX_BACKOFF_MS) {
           await new Promise((r) => setTimeout(r, cool));
           slept = true;
