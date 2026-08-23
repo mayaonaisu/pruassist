@@ -29,6 +29,8 @@ const { scorePass } = await import("../src/lib/agent/score.ts");
 const { clauseById } = await import("../src/lib/knowledge.ts");
 const { applyActs, applyDetections, buildRecord, chooseAlert, saveState, loadState } = await import("../src/lib/agent/ledger.ts");
 const { getStore } = await import("../src/lib/store.ts");
+const { callWithRetry } = await import("../src/lib/agent/gemini.ts");
+const { resetPool } = await import("../src/lib/genai.ts");
 const { buildComplianceRecord, renderComplianceHtml } = await import("../src/lib/agent/record.ts");
 const { rankByRisk, anchorClauses } = await import("../src/lib/agent/lookahead.ts");
 const { matchesLookahead } = await import("../src/lib/agent/cache.ts");
@@ -630,6 +632,31 @@ test("fixTerms leaves ordinary speech untouched and is idempotent", () => {
   const once = fixTerms("pru shield and pru extra");
   assert.equal(once, "PRUShield and PRUExtra");
   assert.equal(fixTerms(once), once, "a second pass changes nothing");
+});
+
+/* ---------- a bad key must not kill a generation call ---------- */
+
+test("callWithRetry rotates past an invalid-key 400 instead of failing the whole call", async () => {
+  // A revoked/mis-pasted key in the pool returns 400 API_KEY_INVALID. With other keys available it
+  // must be skipped, not treated as a terminal failure. (Needs >1 key configured — .env.local has 14.)
+  let calls = 0;
+  const r = await callWithRetry(
+    "test-badkey",
+    async () => {
+      calls++;
+      if (calls === 1) {
+        throw Object.assign(
+          new Error('{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}'),
+          { status: 400 },
+        );
+      }
+      return "ok";
+    },
+    { allowSleep: false },
+  );
+  assert.equal(r, "ok", "rotated to another key and succeeded");
+  assert.ok(calls >= 2, "the call was retried on a different key");
+  resetPool();
 });
 
 /* ---------- the compliance record export (the suitability trail) ---------- */
