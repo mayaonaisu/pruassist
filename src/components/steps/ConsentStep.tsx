@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { SessionInfo } from "@/lib/console-types";
 import DocumentsInScope from "../DocumentsInScope";
-import { productAreas } from "@/lib/knowledge";
+import { conceptAreas } from "@/lib/concepts";
 
 const FOCUS = [
   "policy differences",
@@ -12,7 +12,9 @@ const FOCUS = [
   "objections",
   "claim scenarios",
 ];
-const AREAS = productAreas();
+// Only areas the comprehension engine covers (has authored concepts). Picking an area with no
+// concepts would silently produce no readiness, no alert and an empty Understanding Record.
+const AREAS = conceptAreas();
 
 // Reads the selection back as speech, since the sentence above is what the rep will say.
 function asPhrase(items: string[]): string {

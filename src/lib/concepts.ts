@@ -278,6 +278,15 @@ export function conceptsForArea(area: string): Concept[] {
   return CONCEPTS.filter((c) => c.productArea === area);
 }
 
+// The advisory areas the comprehension engine can actually track — i.e. the ones with authored
+// concepts. The session picker offers only these: an area with clauses but no concepts would give
+// the rep a live session where no readiness, no alert and an empty Understanding Record ever appear,
+// with nothing on screen to say why. Today that is Health Protection alone; add concepts for another
+// area and it shows up here automatically.
+export function conceptAreas(): string[] {
+  return [...new Set(CONCEPTS.map((c) => c.productArea))];
+}
+
 export function conceptById(id: string): Concept | undefined {
   return CONCEPTS.find((c) => c.id === id);
 }
