@@ -21,33 +21,51 @@ const GROQ_TOOLS = [
   { type: "function", function: { name: "compare_options", description: "Fetch the clauses describing the options in a decision the customer is weighing ('which one should I take', 'what's the difference').", parameters: { type: "object", properties: { focus: { type: "string" }, decisionId: { type: "string" } }, required: ["focus"] } } },
 ];
 
+// The Groq key pool: GROQ_API_KEY plus GROQ_API_KEY_2..16. The free tier caps tokens-per-minute per
+// key, so a second and third key roughly multiply the effective TPM — the cheap, no-billing way to
+// stop a burst throttling. Rotated round-robin, advancing on a 429 exactly like the Gemini pool.
+function groqKeys(): string[] {
+  const raw = [process.env.GROQ_API_KEY, ...Array.from({ length: 15 }, (_, i) => process.env[`GROQ_API_KEY_${i + 2}`])];
+  return [...new Set(raw.map((k) => k?.trim()).filter((k): k is string => Boolean(k)))];
+}
+let groqCur = 0;
+
 async function groqChat(messages: Msg[], opts: { tools?: unknown[]; json?: boolean } = {}): Promise<Msg | null> {
-  const key = process.env.GROQ_API_KEY?.trim();
-  if (!key) return null;
-  try {
-    const res = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages,
-        temperature: 0.3,
-        max_tokens: 1400,
-        ...(opts.tools ? { tools: opts.tools, tool_choice: "auto" } : {}),
-        ...(opts.json ? { response_format: { type: "json_object" } } : {}),
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!res.ok) {
+  const keys = groqKeys();
+  if (!keys.length) return null;
+  const body = JSON.stringify({
+    model: GROQ_MODEL,
+    messages,
+    temperature: 0.3,
+    max_tokens: 1400,
+    ...(opts.tools ? { tools: opts.tools, tool_choice: "auto" } : {}),
+    ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+  });
+  // One attempt per key: a 429 (per-key tokens/requests-per-minute) rotates to the next; anything
+  // else is terminal for this call and the caller falls back to Gemini.
+  for (let attempt = 0; attempt < keys.length; attempt++) {
+    const key = keys[groqCur % keys.length];
+    try {
+      const res = await fetch(GROQ_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body,
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.ok) return (await res.json())?.choices?.[0]?.message ?? null;
+      if (res.status === 429) {
+        groqCur = (groqCur + 1) % keys.length; // this key is rate limited — try the next
+        continue;
+      }
       console.error(`[groq] ${res.status}: ${(await res.text()).slice(0, 160)}`);
       return null;
+    } catch (e) {
+      console.error(`[groq] ${e instanceof Error ? e.message : String(e)}`);
+      return null;
     }
-    const data = await res.json();
-    return data?.choices?.[0]?.message ?? null;
-  } catch (e) {
-    console.error(`[groq] ${e instanceof Error ? e.message : String(e)}`);
-    return null;
   }
+  console.error(`[groq] all ${keys.length} keys rate limited`);
+  return null;
 }
 
 // Phase 1: let the model choose what to look up, executing the same tools the Gemini loop uses.
