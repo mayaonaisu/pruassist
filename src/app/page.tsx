@@ -23,7 +23,8 @@ export default function Home() {
     <main>
       <header className="pru-header">
         <Link href="/" className="pru-logo">
-          PRU<i>Assist</i>
+          <img className="pru-mark" src="/prudential-logo.png" alt="Prudential" />
+          <i>Assist</i>
         </Link>
         <Link href="/login" className="pru-btn pru-btn-sm" style={{ marginLeft: "auto" }}>
           Representative sign in <IconArrow size={14} />

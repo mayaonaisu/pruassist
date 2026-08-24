@@ -2,11 +2,11 @@
    Geist Mono = citations, Fraunces = document titles, Inter = interface. */
 
 :root {
-  /* ---- surfaces: brochure paper ---- */
-  --brochure: #faf6ef;
-  --brochure-2: #f2ece1;
-  --brochure-3: #eae2d4;
-  --card: #fffdf9;
+  /* ---- surfaces: Prudential's clean light-grey / white (prudential.com.sg) ---- */
+  --brochure: #f4f5f7;
+  --brochure-2: #eceef1;
+  --brochure-3: #e2e5e9;
+  --card: #ffffff;
 
   /* ---- ink: four levels, all ≥4.5:1 on every surface ---- */
   --ink: #171a21;
@@ -19,10 +19,11 @@
   --rule-soft: rgba(23, 26, 33, 0.06);
   --rule-strong: rgba(23, 26, 33, 0.2);
 
-  /* ---- brand ---- */
-  --pru: #c8102e;
-  --pru-tint: rgba(200, 16, 46, 0.06);
-  --pru-line: rgba(200, 16, 46, 0.28);
+  /* ---- brand: Prudential red, with slate as the secondary accent (prudential.com.sg) ---- */
+  --pru: #ed1b2e;
+  --pru-tint: rgba(237, 27, 46, 0.06);
+  --pru-line: rgba(237, 27, 46, 0.28);
+  --slate: #546885;
 
   /* ---- the highlighter: confusion only ---- */
   --marker: #e8b317;
@@ -124,11 +125,20 @@ button {
   border-bottom: 1px solid var(--rule);
 }
 .pru-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-family: var(--font-serif);
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.012em;
   white-space: nowrap;
+}
+/* The Prudential wordmark; "Assist" sits beside it as the product name. */
+.pru-mark {
+  height: 1.35em;
+  width: auto;
+  display: block;
 }
 .pru-logo i {
   color: var(--pru);
@@ -277,7 +287,7 @@ button {
   border: 0;
   padding: 0;
   font: 400 12.5px var(--font-sans);
-  color: var(--ink-3);
+  color: var(--slate);
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;

@@ -328,7 +328,8 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div style={{ minHeight: "100dvh", background: "var(--brochure)" }}>
       <header className="pru-header">
         <span className="pru-logo">
-          PRU<i>Assist</i>
+          <img className="pru-mark" src="/prudential-logo.png" alt="Prudential" />
+          <i>Assist</i>
         </span>
         <span className="pru-tag">
           <span className="dot" />

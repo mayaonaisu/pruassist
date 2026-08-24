@@ -6,7 +6,8 @@ export default function Chrome({ step }: { step: number }) {
   return (
     <header className="pru-header">
       <span className="pru-logo">
-        PRU<i>Assist</i>
+        <img className="pru-mark" src="/prudential-logo.png" alt="Prudential" />
+        <i>Assist</i>
       </span>
       <div className="pru-steps">
         {STEPS.map((s, i) => (
