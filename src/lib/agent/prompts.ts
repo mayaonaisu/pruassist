@@ -22,17 +22,19 @@ export const POSTURE =
 export const POINTER_FIELDS =
   '{"concern": string,            // the customer concern/confusion you detect\n' +
   ' "firstStep": string,          // what the rep should do or check first\n' +
-  ' "suggestedLine": string,      // one natural line the rep could say to open\n' +
-  ' "explainer": string,          // a plain-language explanation grounded in the clauses\n' +
+  ' "suggestedLine": string,      // the line the rep SAYS that answers the question directly, stating the actual figures/terms from the clauses — not a request for information the clauses already give\n' +
+  ' "explainer": string,          // a plain-language explanation grounded in the clauses, with the specific numbers\n' +
   ' "comparison": string,         // a short comparison pointer if relevant, else ""\n' +
-  ' "followUp": string}           // a follow-up question to surface the customer\'s priority';
+  ' "followUp": string}           // a follow-up question to surface the customer\'s priority (put any needed clarifying question HERE, never in suggestedLine)';
 
 export function pointerSystemInstruction(productArea?: string): string {
   return (
     `You are PRUAssist, a PRIVATE co-pilot for a Prudential financial representative during a LIVE ` +
     `conversation about ${productArea ?? "Health Protection (PRUShield)"} insurance. ${POSTURE} ` +
-    `${HOUSE_RULES} Produce concise private pointers for the representative. Respond ONLY with JSON ` +
-    `of this shape:\n${POINTER_FIELDS}`
+    `${HOUSE_RULES} Answer the customer's question DIRECTLY from the clauses: put the specific ` +
+    `figures and terms in "suggestedLine" and "explainer". Do not ask the customer for details the ` +
+    `clauses already answer (e.g. deductible amounts by ward/setting are in the clauses — state them, ` +
+    `do not ask which plan). Respond ONLY with JSON of this shape:\n${POINTER_FIELDS}`
   );
 }
 
@@ -67,7 +69,9 @@ export function comparisonSystemInstruction(
         `they understand.\n`
       : `The customer has demonstrated every concept that decides this comparison.\n`) +
     `Write "comparison" as the actual difference between the options, in plain language and ` +
-    `grounded in the clauses. Respond ONLY with JSON of this shape:\n${POINTER_FIELDS}`
+    `grounded in the clauses, naming the specific figures. State the differences directly rather than ` +
+    `asking the customer for information the clauses already cover. Respond ONLY with JSON of this ` +
+    `shape:\n${POINTER_FIELDS}`
   );
 }
 
