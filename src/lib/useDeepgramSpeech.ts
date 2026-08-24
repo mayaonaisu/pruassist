@@ -24,6 +24,12 @@ const WS_BASE =
 
 const MAX_RECONNECTS = 5;
 
+// Wall-clock bound on the primary path: if Deepgram delivers no transcript within this window, stop
+// waiting and let the caller fall back to Web Speech. This backs up the attempt counter, which a
+// flapping `enabled`/`joinToken` dep can reset to 0 on every effect restart — leaving the transcript
+// blank indefinitely. The deadline lives in a ref (below) so it keeps counting across those restarts.
+const FIRST_RESULT_DEADLINE_MS = 4000;
+
 export function useDeepgramSpeech(
   enabled: boolean,
   onResult: (r: SpeechResult) => void,
@@ -37,6 +43,11 @@ export function useDeepgramSpeech(
 
   const [status, setStatus] = useState<DeepgramStatus>("idle");
 
+  // The fallback deadline persists across effect restarts (unlike the per-run `attempts` and timers),
+  // so a reconnect storm or a flapping dep can't keep resetting it and strand the transcript blank.
+  // Cleared only once a real transcript proves Deepgram is working; re-armed on the next enable.
+  const deadlineRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!enabled) return; // the hook returns "idle" while disabled without touching state
 
@@ -47,6 +58,11 @@ export function useDeepgramSpeech(
     let keepAlive: ReturnType<typeof setInterval> | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
+    let gotResult = false;
+
+    // Arm the wall-clock fallback once and keep it running across reconnects: Deepgram has until this
+    // instant to deliver a first transcript, whatever the attempt count is doing.
+    const deadline = deadlineRef.current ?? (deadlineRef.current = Date.now() + FIRST_RESULT_DEADLINE_MS);
 
     const stopStreamBits = () => {
       if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
@@ -91,8 +107,11 @@ export function useDeepgramSpeech(
       }
       if (stopped) return;
 
-      // 3) Connect. The JWT rides the query string — it is too long for the subprotocol header.
-      const socket = new WebSocket(`${WS_BASE}&access_token=${encodeURIComponent(token)}`);
+      // 3) Connect. The ephemeral token authenticates through the WebSocket subprotocol
+      // (`Sec-WebSocket-Protocol: bearer, <token>`). Deepgram's streaming endpoint rejects the token
+      // as an `?access_token=` query param — the handshake fails and the socket closes 1006 without
+      // ever opening — so query-string auth silently kills the primary STT path.
+      const socket = new WebSocket(WS_BASE, ["bearer", token]);
       ws = socket;
 
       socket.onopen = () => {
@@ -118,6 +137,9 @@ export function useDeepgramSpeech(
           if (msg.type !== "Results") return;
           const transcript: string = msg.channel?.alternatives?.[0]?.transcript ?? "";
           if (!transcript) return;
+          // First real transcript: Deepgram works. Stop the fallback clock so a later blip can't
+          // strand us, and clear the ref so the next enable gets a fresh window.
+          if (!gotResult) { gotResult = true; deadlineRef.current = null; }
           cbRef.current(msg.is_final ? { final: transcript, interim: "" } : { final: "", interim: transcript });
         } catch {
           /* non-JSON keepalive/metadata — ignore */
@@ -143,10 +165,20 @@ export function useDeepgramSpeech(
       };
     }
 
+    // If nothing has arrived by the deadline, hand off to Web Speech rather than keep reconnecting.
+    const giveUpTimer = setTimeout(() => {
+      if (stopped || gotResult) return;
+      stopped = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      stopStreamBits();
+      setStatus("error"); // caller falls back to Web Speech
+    }, Math.max(0, deadline - Date.now()));
+
     connect();
 
     return () => {
       stopped = true;
+      clearTimeout(giveUpTimer);
       if (retryTimer) clearTimeout(retryTimer);
       stopStreamBits();
       try { stream?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
