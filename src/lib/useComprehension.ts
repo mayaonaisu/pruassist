@@ -15,6 +15,10 @@ const POLL_MS = 5000;
 // POST has responded, so there is nothing to poll — only a short wait.
 const FLUSH_MS = 1600;
 
+// A beat after a new customer line before nudging it up, to coalesce a sentence that finalises in
+// two fragments into one pass. Short enough that the false-assent catch still feels immediate.
+const NUDGE_MS = 900;
+
 export type Prepared = { label: string; question: string; at: number; toolCalls: string[] };
 
 export type AgentView = {
@@ -48,16 +52,22 @@ export function useComprehension({
   roomId,
   repName,
   latest,
+  lines,
 }: {
   roomId: string;
   repName: string;
   latest: () => Line[];
+  // The transcript, so a new customer line can accelerate the loop instead of waiting for the poll.
+  lines: Line[];
 }): Comprehension {
   const [agent, setAgent] = useState<AgentView>(EMPTY);
   const [askedCopied, setAskedCopied] = useState(false);
   const [ending, setEnding] = useState(false);
   const recordRef = useRef<RecordRow[]>([]);
   const sentUpToRef = useRef(0);
+  const lastLineRef = useRef("");
+  const nudgeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const followRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sync = useCallback(
     async (act?: { type: "teach-back-asked" | "dismiss"; conceptId: string }, final = false) => {
@@ -92,6 +102,36 @@ export function useComprehension({
       clearInterval(t);
     };
   }, [sync]);
+
+  // Accelerator on top of the poll: the false-assent catch is the product's signature moment, and
+  // waiting for one timer tick to upload the customer's "okay" and a second to read the result back
+  // surfaced it 5–10s late, after the rep had moved on. On each new customer line, nudge the turn up
+  // promptly (which schedules the deep pass) and read the folded ledger back a beat later. Short acks
+  // are deliberately NOT skipped here — a bare "okay" is exactly the signal — unlike usePointers,
+  // which skips them because a bare ack needs no line to say. The poll stays as the backstop.
+  useEffect(() => {
+    const last = lines[lines.length - 1];
+    if (!last || last.speaker === repName) return;
+    if (lastLineRef.current === last.id) return;
+    lastLineRef.current = last.id;
+    if (nudgeRef.current) clearTimeout(nudgeRef.current);
+    nudgeRef.current = setTimeout(async () => {
+      await sync(); // uploads the fresh turns and schedules the deep pass over them
+      if (followRef.current) clearTimeout(followRef.current);
+      // By now sentUpToRef has advanced, so this second call sends no turns — it is a pure read that
+      // brings the just-folded ledger (and its new alert) back down.
+      followRef.current = setTimeout(() => sync(), FLUSH_MS);
+    }, NUDGE_MS);
+  }, [lines, repName, sync]);
+
+  // Clear the accelerator timers on unmount so a late fire can't setState after teardown.
+  useEffect(
+    () => () => {
+      if (nudgeRef.current) clearTimeout(nudgeRef.current);
+      if (followRef.current) clearTimeout(followRef.current);
+    },
+    [],
+  );
 
   // A rep action is not a ledger write: it goes to its own key and the next deep pass folds it in.
   const act = useCallback(

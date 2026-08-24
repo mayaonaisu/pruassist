@@ -87,7 +87,7 @@ function LiveConsole({
 
   const [auto, setAuto] = useState(true);
   const pointers = usePointers({ roomId: session.roomId, repName, lines, latest, auto });
-  const comprehension = useComprehension({ roomId: session.roomId, repName, latest });
+  const comprehension = useComprehension({ roomId: session.roomId, repName, latest, lines });
   const { agent } = comprehension;
 
   const [copied, setCopied] = useState(false);
