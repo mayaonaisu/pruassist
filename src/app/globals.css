@@ -998,9 +998,19 @@ button {
 .tr-body {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  overflow: hidden;
+  flex: 1;
+  overflow-y: auto;
   min-height: 0;
+}
+/* Pin short content to the bottom (the live-feed look) without letting a full feed overflow past
+   the top edge under the header — `justify-content: flex-end` clips the top line and hides history;
+   `margin-top: auto` bottom-aligns when short and scrolls when tall. */
+.tr-body > :first-child {
+  margin-top: auto;
+}
+/* Long unbroken tokens (URLs, mis-heard run-ons) must wrap, not widen the pane. */
+.tr-line {
+  overflow-wrap: anywhere;
 }
 .tr-line {
   font-size: 12px;

@@ -24,11 +24,15 @@ const WS_BASE =
 
 const MAX_RECONNECTS = 5;
 
-// Wall-clock bound on the primary path: if Deepgram delivers no transcript within this window, stop
-// waiting and let the caller fall back to Web Speech. This backs up the attempt counter, which a
-// flapping `enabled`/`joinToken` dep can reset to 0 on every effect restart — leaving the transcript
-// blank indefinitely. The deadline lives in a ref (below) so it keeps counting across those restarts.
-const FIRST_RESULT_DEADLINE_MS = 4000;
+// Wall-clock bound on *connecting*: if the socket never opens within this window, stop retrying and
+// let the caller fall back to Web Speech. This backs up the attempt counter, which a flapping
+// `enabled`/`joinToken` dep can reset to 0 on every effect restart — leaving the transcript blank
+// indefinitely. The deadline lives in a ref (below) so it keeps counting across those restarts.
+//
+// It measures time-to-connect, NOT time-to-first-word: an open socket that is simply hearing silence
+// is healthy, and must never be torn down for Web Speech. Generous enough to clear a cold serverless
+// token route plus the Deepgram handshake.
+const CONNECT_DEADLINE_MS = 8000;
 
 export function useDeepgramSpeech(
   enabled: boolean,
@@ -58,11 +62,11 @@ export function useDeepgramSpeech(
     let keepAlive: ReturnType<typeof setInterval> | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
-    let gotResult = false;
+    let opened = false;
 
-    // Arm the wall-clock fallback once and keep it running across reconnects: Deepgram has until this
-    // instant to deliver a first transcript, whatever the attempt count is doing.
-    const deadline = deadlineRef.current ?? (deadlineRef.current = Date.now() + FIRST_RESULT_DEADLINE_MS);
+    // Arm the wall-clock fallback once and keep it running across reconnects: the socket has until
+    // this instant to open, whatever the attempt count is doing.
+    const deadline = deadlineRef.current ?? (deadlineRef.current = Date.now() + CONNECT_DEADLINE_MS);
 
     const stopStreamBits = () => {
       if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
@@ -117,6 +121,10 @@ export function useDeepgramSpeech(
       socket.onopen = () => {
         if (stopped) return;
         attempts = 0;
+        // Connected: Deepgram is healthy even before the first word. Disarm the fallback clock and
+        // clear the ref so the next enable gets a fresh window.
+        opened = true;
+        deadlineRef.current = null;
         setStatus("listening");
         const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg"].find((m) => MediaRecorder.isTypeSupported(m));
         const rec = new MediaRecorder(stream!, mime ? { mimeType: mime } : undefined);
@@ -137,9 +145,6 @@ export function useDeepgramSpeech(
           if (msg.type !== "Results") return;
           const transcript: string = msg.channel?.alternatives?.[0]?.transcript ?? "";
           if (!transcript) return;
-          // First real transcript: Deepgram works. Stop the fallback clock so a later blip can't
-          // strand us, and clear the ref so the next enable gets a fresh window.
-          if (!gotResult) { gotResult = true; deadlineRef.current = null; }
           cbRef.current(msg.is_final ? { final: transcript, interim: "" } : { final: "", interim: transcript });
         } catch {
           /* non-JSON keepalive/metadata — ignore */
@@ -165,9 +170,10 @@ export function useDeepgramSpeech(
       };
     }
 
-    // If nothing has arrived by the deadline, hand off to Web Speech rather than keep reconnecting.
+    // If the socket has not opened by the deadline, hand off to Web Speech rather than keep
+    // reconnecting. An already-open socket (even a silent one) has cleared `opened` and is left alone.
     const giveUpTimer = setTimeout(() => {
-      if (stopped || gotResult) return;
+      if (stopped || opened) return;
       stopped = true;
       if (retryTimer) clearTimeout(retryTimer);
       stopStreamBits();
