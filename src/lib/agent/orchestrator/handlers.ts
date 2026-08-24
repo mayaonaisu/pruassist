@@ -55,10 +55,15 @@ async function gatherClauses(input: OrchestratorInput, hint?: string): Promise<H
   return retrieve(input.transcript, 3, input.scope);
 }
 
-// Provider-branched raw JSON getter: Groq (fast, OpenAI-compatible) or Gemini. The caller shapes the
-// result into Pointers identically, so the grounding checks stay shared across providers.
+// Provider-branched raw JSON getter: Groq (fast, OpenAI-compatible) primary, Gemini fallback. Groq's
+// free tier caps tokens-per-minute on a single key, so a throttle (429) or error falls through to
+// Gemini rather than failing the turn. The caller shapes both identically, so grounding is shared.
 async function generateRaw(instruction: string, hits: Hit[], transcript: string): Promise<string | null> {
-  if (groqEnabled()) return groqGenerateRaw(instruction, clauseBlock(hits), transcript);
+  if (groqEnabled()) {
+    const groq = await groqGenerateRaw(instruction, clauseBlock(hits), transcript);
+    if (groq !== null) return groq;
+    // Groq unavailable — fall through to Gemini rather than drop to a rate-limit note.
+  }
   const response = await callWithRetry(
     "orchestrator",
     (ai) =>
