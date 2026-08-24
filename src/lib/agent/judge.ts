@@ -54,9 +54,14 @@ export async function gradeExplainBack(concept: Concept, answer: string): Promis
           "representative asked about one thing, and an alert about a second thing would read as " +
           "the customer having failed when they did not. " +
           "`correct` means they captured the substance, even loosely and without the jargon. " +
-          "`partial` means part of it is right and a material part is missing. `wrong` means they " +
-          "stated something the clauses contradict. Be generous about wording and strict about " +
-          "substance: a customer explaining it in their own words is the point. " +
+          "`partial` means part of it is right and a material part is either missing or stated " +
+          "wrongly. `wrong` is for an answer with none of the idea left standing: the substance " +
+          "itself is contradicted, not one part of it hanging off a half the customer did get. " +
+          "An answer that lands half the idea and has the other half backwards is `partial`, " +
+          "never `wrong` — the half they landed is real, and grading the whole answer wrong " +
+          "sends the representative back to explain it from the start when one thing needs " +
+          "correcting. Be generous about wording and strict about substance: a customer " +
+          "explaining it in their own words is the point. " +
           "`missing` names the specific part they did not get, addressed to the representative in " +
           "one short sentence, and is empty when the verdict is correct. `got` names what they did " +
           "get, in one short clause.",
