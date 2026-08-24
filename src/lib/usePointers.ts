@@ -53,8 +53,9 @@ export type PointerConsole = {
   openKey: string | null;
   setOpenKey: (fn: (k: string | null) => string | null) => void;
   ask: (opts?: { rephrase?: boolean; clarifyContext?: string }) => Promise<void>;
-  // The rep answers a clarification prompt; re-asks with that context so the turn re-routes.
-  clarifyAnswer: (context: string) => Promise<void>;
+  // The rep gives the AI context (answering a clarification, or volunteering it); re-routes the turn
+  // and rides the ones after it.
+  provideContext: (text: string) => Promise<void>;
   markUsed: (key: string) => void;
   dismiss: () => void;
   stats: () => Stats;
@@ -87,6 +88,10 @@ export function usePointers({
   const lastTriggerRef = useRef("");
   const statsRef = useRef<Stats>({ surfaced: 0, used: 0, flags: 0, docs: 0 });
   const docsRef = useRef<Set<string>>(new Set());
+  // Context the rep has volunteered (or given in answer to a clarification). It rides every
+  // subsequent turn, not just the one it was typed on — which two plans they are comparing stays
+  // true for the rest of the conversation.
+  const contextRef = useRef("");
 
   // `rephrase` replaces the current pointers, so it must not re-count them as new flags.
   const ask = useCallback(
@@ -103,6 +108,7 @@ export function usePointers({
       setNote(undefined);
       const startedRequest = performance.now();
       try {
+        const ctx = (clarifyContext ?? contextRef.current).trim();
         const res = await fetch("/api/assist", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -110,7 +116,7 @@ export function usePointers({
             transcript,
             roomId,
             asked: lastFromCustomer(latest(), repName),
-            clarifyContext,
+            clarifyContext: ctx || undefined,
           }),
         });
         const data = await res.json();
@@ -187,10 +193,16 @@ export function usePointers({
     [],
   );
 
-  const clarifyAnswer = useCallback(
-    async (context: string) => {
+  // The rep gives the AI context — either answering a clarification it raised, or volunteering it
+  // unprompted from the context chat. Either way it re-routes the current turn and sticks for the
+  // ones after (contextRef), and clears any pending clarification.
+  const provideContext = useCallback(
+    async (text: string) => {
+      const ctx = text.trim();
+      if (!ctx) return;
+      contextRef.current = ctx;
       setClarify(null);
-      await ask({ clarifyContext: context });
+      await ask({ clarifyContext: ctx });
     },
     [ask],
   );
@@ -212,5 +224,5 @@ export function usePointers({
     setMode(null);
   }, []);
 
-  return { result, note, mode, clarify, loading, latencyMs, used, openKey, setOpenKey, ask, clarifyAnswer, markUsed, dismiss, stats };
+  return { result, note, mode, clarify, loading, latencyMs, used, openKey, setOpenKey, ask, provideContext, markUsed, dismiss, stats };
 }

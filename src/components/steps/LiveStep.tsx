@@ -7,7 +7,7 @@ import { CAM_LABEL, Faces, isBroken } from "@/components/Faces";
 import { useComprehension } from "@/lib/useComprehension";
 import { useConsent } from "@/lib/useConsent";
 import { useLocalMedia } from "@/lib/useLocalMedia";
-import { usePointers } from "@/lib/usePointers";
+import { usePointers, type Clarify } from "@/lib/usePointers";
 import { useTranscript } from "@/lib/useTranscript";
 import { resolveHotkey } from "@/lib/hotkeys";
 import { groupCitations, transcriptText, type Line } from "@/lib/transcript";
@@ -274,10 +274,7 @@ function LiveConsole({
       {/* THE LINE — the one thing the rep reads mid-conversation. A polite live region so a
           screen-reader rep is announced the line to say when it arrives, not left to find it. */}
       <div className="line-block" aria-live="polite">
-        {pointers.clarify ? (
-          // The orchestrator needs context before it will answer — ask the rep, then re-route.
-          <ClarifyPrompt prompt={pointers.clarify.prompt} onSubmit={pointers.clarifyAnswer} />
-        ) : pointers.loading && !result ? (
+        {pointers.loading && !result ? (
           <>
             <div className="pru-skeleton" style={{ height: 12, width: "30%", marginBottom: 12 }} />
             <div className="pru-skeleton" style={{ height: 22, width: "92%", marginBottom: 8 }} />
@@ -425,6 +422,8 @@ function LiveConsole({
           </div>
         </div>
       </div>
+
+      <ContextChat clarify={pointers.clarify} onSend={pointers.provideContext} />
     </div>
   );
 }
@@ -515,32 +514,98 @@ const RESULT_CAT: Record<string, string> = {
   guider: "Suggested move",
 };
 
-// A clarification prompt: the rep types the missing context, which re-routes the turn.
-function ClarifyPrompt({ prompt, onSubmit }: { prompt: string; onSubmit: (context: string) => void }) {
-  const [text, setText] = useState("");
+function IconChat() {
   return (
-    <div className="pru-enter clarify">
-      <div className="lb-head">
-        <span className="cat">Clarify first</span>
-      </div>
-      <div className="concern">{prompt}</div>
-      <form
-        className="clarify-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (text.trim()) onSubmit(text.trim());
-        }}
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.6-.8L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z" />
+    </svg>
+  );
+}
+
+// The context chat: the assistant asks the rep for context it can't hear, and the rep can volunteer
+// it any time. A floating panel so it never crowds the line the rep is reading — it pulls attention
+// with a dot and auto-opens when the assistant raises a question. Private to the rep, like everything
+// on this console.
+function ContextChat({ clarify, onSend }: { clarify: Clarify | null; onSend: (text: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<{ role: "ai" | "rep"; text: string }[]>([]);
+  const [draft, setDraft] = useState("");
+  const lastAsk = useRef<string | null>(null);
+  const feedRef = useRef<HTMLDivElement>(null);
+
+  // A new clarification joins the thread and opens the panel. The attention dot is derived from the
+  // pending question (clarify && !open), so nothing needs to be tracked here.
+  useEffect(() => {
+    const q = clarify?.question ?? null;
+    if (q && q !== lastAsk.current) {
+      lastAsk.current = q;
+      setMessages((m) => [...m, { role: "ai", text: clarify!.prompt }]);
+      setOpen(true);
+    }
+    if (!q) lastAsk.current = null;
+  }, [clarify]);
+
+  useEffect(() => {
+    if (open) feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight });
+  }, [open, messages]);
+
+  const send = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setMessages((m) => [...m, { role: "rep", text }]);
+    setDraft("");
+    onSend(text);
+  };
+
+  return (
+    <div className="ctx">
+      {open && (
+        <div className="ctx-panel pru-enter" role="dialog" aria-label="Assistant context chat">
+          <div className="ctx-head">
+            <span className="ctx-title">Context · private to you</span>
+            <button className="ctx-x" onClick={() => setOpen(false)} aria-label="Close context chat">
+              ×
+            </button>
+          </div>
+          <div ref={feedRef} className="ctx-feed">
+            {messages.length === 0 ? (
+              <p className="ctx-empty">
+                Tell the assistant what it can’t hear — which options you’re comparing, the customer’s
+                situation, what you’re about to explain. It sharpens the next suggestion, and it asks
+                here when it needs to.
+              </p>
+            ) : (
+              messages.map((m, i) => (
+                <div key={i} className={`ctx-msg ctx-${m.role}`}>
+                  {m.text}
+                </div>
+              ))
+            )}
+          </div>
+          <form className="ctx-form" onSubmit={(e) => { e.preventDefault(); send(); }}>
+            <input
+              className="ctx-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Add context, e.g. comparing Premier with Plus"
+              aria-label="Message the assistant"
+            />
+            <button className="ctx-send" type="submit" disabled={!draft.trim()}>
+              Send
+            </button>
+          </form>
+        </div>
+      )}
+      <button
+        className={`ctx-fab ${clarify ? "asking" : ""}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-label={open ? "Hide context chat" : "Open context chat"}
+        title="Context chat — tell the assistant what it can’t hear"
       >
-        <input
-          className="clarify-input"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Tell PRUAssist what to assume, e.g. comparing the base plan with PRUExtra"
-        />
-        <button className="said" type="submit" disabled={!text.trim()}>
-          Answer
-        </button>
-      </form>
+        <IconChat />
+        <span>Context</span>
+        {clarify && !open && <span className="ctx-dot" aria-hidden="true" />}
+      </button>
     </div>
   );
 }
