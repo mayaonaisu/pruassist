@@ -43,6 +43,7 @@ const { lastFromCustomer, newestAt, toTurns, windowToSend } = await import("../s
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
 const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
+const { resolveHotkey } = await import("../src/lib/hotkeys.ts");
 const { runOrchestrator } = await import("../src/lib/agent/orchestrator/graph.ts");
 const { handleGuider, agenticLiveEnabled } = await import("../src/lib/agent/orchestrator/handlers.ts");
 const { DRIFT_PAUSE_AFTER, RESETS_DRIFT, loadDrift, recordDrift, clearDrift, judgePausedTurn } = await import("../src/lib/agent/orchestrator/drift.ts");
@@ -953,3 +954,35 @@ test(
     assert.equal(r.hit, true, `expected a hit, scored ${r.score}`);
   },
 );
+
+// --- live-console keyboard shortcuts (resolveHotkey) ---
+test("hotkey: Enter marks the suggested line said", () => {
+  assert.equal(resolveHotkey({ key: "Enter" }), "said");
+});
+
+test("hotkey: R (any case, shift allowed) says it simpler", () => {
+  assert.equal(resolveHotkey({ key: "r" }), "simpler");
+  assert.equal(resolveHotkey({ key: "R" }), "simpler");
+});
+
+test("hotkey: Escape dismisses the line", () => {
+  assert.equal(resolveHotkey({ key: "Escape" }), "dismiss");
+});
+
+test("hotkey: focus in a field or on a control lets native handling win", () => {
+  // Typing "r" into the clarify input, or pressing Enter on a focused button, must not fire.
+  assert.equal(resolveHotkey({ key: "r", inControl: true }), null);
+  assert.equal(resolveHotkey({ key: "Enter", inControl: true }), null);
+  assert.equal(resolveHotkey({ key: "Escape", inControl: true }), null);
+});
+
+test("hotkey: a modifier combo is left to the browser (Ctrl+R must still reload)", () => {
+  assert.equal(resolveHotkey({ key: "r", ctrlKey: true }), null);
+  assert.equal(resolveHotkey({ key: "r", metaKey: true }), null);
+  assert.equal(resolveHotkey({ key: "Enter", altKey: true }), null);
+});
+
+test("hotkey: an unmapped key does nothing", () => {
+  assert.equal(resolveHotkey({ key: "q" }), null);
+  assert.equal(resolveHotkey({ key: " " }), null);
+});

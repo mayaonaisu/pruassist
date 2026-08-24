@@ -586,6 +586,21 @@ button {
   color: var(--pencil);
   margin-bottom: 8px;
 }
+/* Degraded mode: keyword-only detection because embeddings were unavailable. A muted amber note,
+   not an alarm — the assistant still works, just less precisely. */
+.degraded-tag {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--marker-ink);
+  background: var(--marker-wash);
+  border-radius: var(--r-xs);
+  padding: 3px 7px;
+  margin-bottom: 8px;
+  cursor: help;
+}
 /* Readiness — what still stands between the rep and a recommendation. Colours match the
    Understanding Record's .ur-* states so the console and the artifact agree. */
 .ready-idle {

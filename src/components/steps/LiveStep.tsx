@@ -9,6 +9,7 @@ import { useConsent } from "@/lib/useConsent";
 import { useLocalMedia } from "@/lib/useLocalMedia";
 import { usePointers } from "@/lib/usePointers";
 import { useTranscript } from "@/lib/useTranscript";
+import { resolveHotkey } from "@/lib/hotkeys";
 import { transcriptText } from "@/lib/transcript";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
 import type { Alert, ConceptState } from "@/lib/agent/types";
@@ -94,6 +95,12 @@ function LiveConsole({
   const [startedAt, setStartedAt] = useState(0);
   const startRef = useRef(0);
   const feedRef = useRef<HTMLDivElement>(null);
+  // The key handler subscribes once; read the freshest pointers through a ref rather than
+  // re-binding the listener on every interim-transcript re-render.
+  const pointersRef = useRef(pointers);
+  useEffect(() => {
+    pointersRef.current = pointers;
+  });
 
   useEffect(() => {
     startRef.current = Date.now();
@@ -103,6 +110,30 @@ function LiveConsole({
   useEffect(() => {
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight });
   }, [lines, interim]);
+
+  // Keyboard shortcuts for the line the rep reads aloud: Enter = said, R = simpler, Esc = not now.
+  // Only while a line is showing; resolveHotkey ignores modifier combos and any keypress landing in a
+  // field or on a control, so typing in the clarify box and clicking buttons stay untouched.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const p = pointersRef.current;
+      if (!p.result) return;
+      const t = e.target as HTMLElement | null;
+      const inControl = !!t && (/^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName) || t.isContentEditable);
+      const action = resolveHotkey({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, inControl });
+      if (!action) return;
+      e.preventDefault();
+      if (action === "said") {
+        if (!p.used.has("line")) p.markUsed("line");
+      } else if (action === "simpler") {
+        if (!p.loading) p.ask({ rephrase: true });
+      } else {
+        p.dismiss();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const end = useCallback(async () => {
     if (comprehension.ending) return;
@@ -184,6 +215,16 @@ function LiveConsole({
       <div className="c-top">
         <Faces media={media} />
         <div className="c-meta">
+          {/* Honesty about the mode: when embeddings are unavailable the detectors fall back to
+              keyword overlap, which is less precise. CONTEXT.md promises the console says so. */}
+          {agent.degraded && (
+            <div
+              className="degraded-tag"
+              title="Embeddings are unavailable, so the assistant is matching on keywords only — detection is less precise this session."
+            >
+              Reduced accuracy · keyword matching
+            </div>
+          )}
           {/* What still stands between the representative and a recommendation. This replaced a
               strip of bars derived from a handful of timestamps — real ledger state, same slot. */}
           <div className="strip-h">{agent.readiness?.question ?? "Ready to recommend"}</div>
@@ -273,8 +314,9 @@ function LiveConsole({
         </div>
       )}
 
-      {/* THE LINE — the one thing the rep reads mid-conversation. */}
-      <div className="line-block">
+      {/* THE LINE — the one thing the rep reads mid-conversation. A polite live region so a
+          screen-reader rep is announced the line to say when it arrives, not left to find it. */}
+      <div className="line-block" aria-live="polite">
         {pointers.clarify ? (
           // The orchestrator needs context before it will answer — ask the rep, then re-route.
           <ClarifyPrompt prompt={pointers.clarify.prompt} onSubmit={pointers.clarifyAnswer} />
