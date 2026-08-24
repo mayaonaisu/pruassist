@@ -16,11 +16,14 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
-  if (username !== U || password !== P) {
+  // Username match is case-insensitive so the display can follow whatever the rep typed; the
+  // password stays exact.
+  const typed = typeof username === "string" ? username.trim() : "";
+  if (typeof password !== "string" || typed.toLowerCase() !== U.trim().toLowerCase() || password !== P) {
     return NextResponse.json({ error: "Invalid username or password." }, { status: 401 });
   }
 
-  const token = await createSessionToken(username);
+  const token = await createSessionToken(typed);
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
