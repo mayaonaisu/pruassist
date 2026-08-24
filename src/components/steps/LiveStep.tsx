@@ -222,10 +222,41 @@ function LiveConsole({
         </div>
       )}
 
-      <div className="c-top">
-        <Faces media={media} />
-      </div>
+      <div className="console">
+        {/* THE CALL — everything about the live conversation: the faces, the transcript that is the
+            record, and the context chat between the rep and the assistant. */}
+        <div className="call-rail">
+          <Faces media={media} />
 
+          <div className="pane tr">
+            <div className="deck-h">
+              Transcript{media.mic === "off" ? " · paused" : consent ? "" : " · awaiting consent"}
+            </div>
+            <div ref={feedRef} className="tr-body">
+              {lines.length === 0 && Object.values(visibleInterim).every((v) => !v) && (
+                <p className="pru-muted" style={{ fontSize: 12 }}>
+                  Appears here as you and the customer speak. Double-click a line to correct a mis-hearing.
+                </p>
+              )}
+              {lines.slice(-12).map((l) => (
+                <TranscriptLine key={l.id} line={l} isRep={l.speaker === repName} onEdit={editLine} />
+              ))}
+              {Object.entries(visibleInterim).map(([sp, txt]) =>
+                txt ? (
+                  <div key={"i-" + sp} className="tr-line now">
+                    <span className="who">{sp === repName ? "YOU · LIVE" : sp.toUpperCase()}</span>
+                    {txt}
+                  </div>
+                ) : null,
+              )}
+            </div>
+          </div>
+
+          <ContextChat clarify={pointers.clarify} onSend={pointers.provideContext} />
+        </div>
+
+        {/* THE PROMPTER — what changes the advice (the alert), the line to say, and the backup. */}
+        <div className="prompter">
       {/* COMPREHENSION — evidence about the customer, never a verdict, and never blocking.
           It sits above the line because it changes what the rep should say next. */}
       {agent.alert && (
@@ -372,7 +403,6 @@ function LiveConsole({
         )}
       </div>
 
-      <div className="c-bot">
         <div className="pane sup">
           <div className="deck-h">If you need more</div>
           <div className="sup-body pru-scroll">
@@ -397,33 +427,8 @@ function LiveConsole({
             )}
           </div>
         </div>
-
-        <div className="pane tr">
-          <div className="deck-h">
-            Transcript{media.mic === "off" ? " · paused" : consent ? "" : " · awaiting consent"}
-          </div>
-          <div ref={feedRef} className="tr-body">
-            {lines.length === 0 && Object.values(visibleInterim).every((v) => !v) && (
-              <p className="pru-muted" style={{ fontSize: 12 }}>
-                Appears here as you and the customer speak. Double-click a line to correct a mis-hearing.
-              </p>
-            )}
-            {lines.slice(-12).map((l) => (
-              <TranscriptLine key={l.id} line={l} isRep={l.speaker === repName} onEdit={editLine} />
-            ))}
-            {Object.entries(visibleInterim).map(([sp, txt]) =>
-              txt ? (
-                <div key={"i-" + sp} className="tr-line now">
-                  <span className="who">{sp === repName ? "YOU · LIVE" : sp.toUpperCase()}</span>
-                  {txt}
-                </div>
-              ) : null,
-            )}
-          </div>
         </div>
       </div>
-
-      <ContextChat clarify={pointers.clarify} onSend={pointers.provideContext} />
     </div>
   );
 }
@@ -558,7 +563,7 @@ function ContextChat({ clarify, onSend }: { clarify: Clarify | null; onSend: (te
   };
 
   return (
-    <div className="ctx">
+    <div className="ctx-dock">
       {open && (
         <div className="ctx-panel pru-enter" role="dialog" aria-label="Assistant context chat">
           <div className="ctx-head">
@@ -597,14 +602,16 @@ function ContextChat({ clarify, onSend }: { clarify: Clarify | null; onSend: (te
         </div>
       )}
       <button
-        className={`ctx-fab ${clarify ? "asking" : ""}`}
+        className={`ctx-bar ${clarify ? "asking" : ""}`}
         onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
         aria-label={open ? "Hide context chat" : "Open context chat"}
         title="Context chat — tell the assistant what it can’t hear"
       >
         <IconChat />
-        <span>Context</span>
+        <span className="ctx-bar-t">Context{clarify ? " · needed" : ""}</span>
         {clarify && !open && <span className="ctx-dot" aria-hidden="true" />}
+        <span className="ctx-caret" aria-hidden="true">{open ? "▾" : "▴"}</span>
       </button>
     </div>
   );

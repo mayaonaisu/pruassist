@@ -431,14 +431,53 @@ button {
 }
 
 /* the two faces in one short row; the freed width carries the timeline */
-.c-top {
+/* The console is two columns: the live call on the left, the prompter on the right. This replaced a
+   stack of boxes that left a gap beside the shrunken video row and put a floating button over the
+   transcript. */
+.console {
   display: flex;
-  gap: 11px;
+  gap: 13px;
+  flex: 1;
+  min-height: 0;
+}
+.call-rail {
   flex: none;
-  flex-wrap: wrap;
-  /* With the readiness panel gone the row holds only the two faces — centre them so the reclaimed
-     width reads as calm space rather than a gap where a box used to be. */
-  justify-content: center;
+  width: clamp(300px, 26vw, 380px);
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  min-height: 0;
+}
+.prompter {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+/* In the rail the two faces stack and fill the width; the rep's self-view is smaller because the
+   customer's face is what the rep reads. */
+.call-rail .cams {
+  flex-direction: column;
+  width: 100%;
+}
+.call-rail .cam {
+  width: 100%;
+}
+.call-rail .cam.me {
+  aspect-ratio: auto;
+  height: clamp(84px, 12vh, 116px);
+}
+/* The transcript fills the rest of the rail; the context dock sits under it. */
+.call-rail .pane.tr {
+  flex: 1;
+  min-height: 0;
+}
+/* The line is the hero of the prompter, so the backup deck is capped and the line takes the rest. */
+.prompter .pane.sup {
+  flex: none;
+  max-height: clamp(130px, 20vh, 220px);
 }
 .cams {
   display: flex;
@@ -849,13 +888,6 @@ button {
 }
 
 /* supporting material + transcript, side by side under the line */
-.c-bot {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(260px, 22vw, 380px);
-  gap: 13px;
-  flex: none;
-  height: clamp(190px, 27vh, 320px);
-}
 .pane {
   border: 1px solid var(--rule);
   border-radius: var(--r-md);
@@ -1512,8 +1544,8 @@ button {
 
 /* ============ responsive ============ */
 @media (max-width: 1080px) {
-  .c-bot {
-    grid-template-columns: minmax(0, 1fr) 250px;
+  .call-rail {
+    width: clamp(260px, 24vw, 320px);
   }
   .say-wrap {
     grid-template-columns: minmax(0, 1fr) 140px;
@@ -1532,20 +1564,32 @@ button {
   .pru-grid-3 {
     grid-template-columns: 1fr;
   }
-  /* Below this the console scrolls: two faces plus the line on a phone shrinks both past use. */
+  /* Below this the console scrolls and stacks: the two-column split is too cramped on a phone. */
   .pru-live {
     height: auto;
     min-height: 0;
   }
-  .cams {
-    flex: 1 1 100%;
+  .console {
+    flex-direction: column;
   }
-  .cam {
+  .call-rail {
+    width: auto;
+  }
+  /* Full width again, so the faces go back to a row and the rep's self-view resumes 16:9. */
+  .call-rail .cams {
+    flex-direction: row;
+  }
+  .call-rail .cam {
     flex: 1;
     width: auto;
   }
-  .c-bot {
-    grid-template-columns: 1fr;
+  .call-rail .cam.me {
+    aspect-ratio: 16 / 9;
+    height: auto;
+  }
+  .call-rail .pane.tr {
+    flex: none;
+    max-height: 240px;
   }
   .pane {
     max-height: 260px;
@@ -1605,62 +1649,57 @@ button {
   }
 }
 
-/* ============ context chat ============
+/* ============ context chat (docked in the call rail) ============
    The assistant asks the rep for context it can't hear, and the rep can volunteer it any time.
-   Floating so it never crowds the line the rep is reading. */
-.ctx {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 60;
+   Docked at the foot of the call rail so it never floats over the transcript or the line. */
+.ctx-dock {
+  flex: none;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+  gap: 8px;
 }
-.ctx-fab {
-  position: relative;
+.ctx-bar {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 15px;
-  border-radius: 999px;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--rule-strong);
   background: var(--card);
   color: var(--ink-2);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
 }
-.ctx-fab:hover {
+.ctx-bar:hover {
   border-color: var(--pencil);
 }
-.ctx-fab.asking {
+.ctx-bar.asking {
   border-color: var(--pru);
   color: var(--pru);
 }
+.ctx-bar-t {
+  margin-right: auto;
+}
+.ctx-caret {
+  font-size: 10px;
+  color: var(--pencil);
+}
 .ctx-dot {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--pru);
-  border: 2px solid var(--card);
 }
+/* Opens above the bar and takes a fixed slice of the rail; the transcript above it shrinks. */
 .ctx-panel {
-  width: min(360px, calc(100vw - 40px));
-  height: 420px;
-  max-height: calc(100dvh - 120px);
+  height: clamp(190px, 32vh, 300px);
   display: flex;
   flex-direction: column;
   background: var(--card);
   border: 1px solid var(--rule);
   border-radius: var(--r-md);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.16);
   overflow: hidden;
 }
 .ctx-head {
