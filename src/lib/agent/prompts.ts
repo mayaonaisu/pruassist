@@ -22,7 +22,7 @@ export const POSTURE =
 export const POINTER_FIELDS =
   '{"concern": string,            // the customer concern/confusion you detect\n' +
   ' "firstStep": string,          // what the rep should do or check first\n' +
-  ' "suggestedLine": string,      // the line the rep SAYS that answers the question directly, stating the actual figures/terms from the clauses — not a request for information the clauses already give\n' +
+  ' "suggestedLine": string,      // the exact words the rep SAYS to the customer: answer directly with the actual figures/terms from the clauses. Speak naturally — never write "clause", "[1]", or any citation marker here (citations are shown separately)\n' +
   ' "explainer": string,          // a plain-language explanation grounded in the clauses, with the specific numbers\n' +
   ' "comparison": string,         // a short comparison pointer if relevant, else ""\n' +
   ' "followUp": string}           // a follow-up question to surface the customer\'s priority (put any needed clarifying question HERE, never in suggestedLine)';
