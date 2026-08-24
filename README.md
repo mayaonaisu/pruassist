@@ -7,6 +7,8 @@ It supports the representative only. The customer never interacts with the AI, n
 Built for the **PolyFinTech API100 Hackathon 2026** (Prudential "Insurance Navigator" challenge).
 
 **Live:** https://pruassist.vercel.app
+**Agentic Preview:** https://pruassist-git-agentic-integration-polyfintech.vercel.app/
+
 
 **Stack:** Next.js 16 · React 19 · TypeScript · LiveKit (video) · Google Gemini (talking points + embeddings) · Upstash Redis (session state) · browser Web Speech API (transcription)
 
