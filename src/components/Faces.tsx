@@ -1,19 +1,40 @@
 "use client";
 
-import { ParticipantTile, useRemoteParticipants, useTracks } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import { useEffect, useState } from "react";
+import { ParticipantTile, useRemoteParticipants, useRoomContext, useTracks } from "@livekit/components-react";
+import { RoomEvent, Track } from "livekit-client";
 import type { DeviceStatus, useLocalMedia } from "@/lib/useLocalMedia";
 
 // The two faces in one row. Customer first; the rep's own tile carries the device controls.
 // Kept apart from the console because it is the one part of that screen with no AI in it.
 
 export function Faces({ media }: { media: ReturnType<typeof useLocalMedia> }) {
-  const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
-  const local = tracks.find((t) => t.participant.isLocal);
-  const remotes = tracks.filter((t) => !t.participant.isLocal);
+  const room = useRoomContext();
+  const camTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+  const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
+  const local = camTracks.find((t) => t.participant.isLocal);
+  const remotes = camTracks.filter((t) => !t.participant.isLocal);
   // Presence separate from video: a customer who is in the room with their camera off should read
   // as "connected", not "waiting" — otherwise a camera-off customer looks like no customer at all.
   const remotePeople = useRemoteParticipants();
+
+  // A mute (mic or camera) fires TrackMuted/TrackUnmuted, which useTracks does not re-render on — so
+  // the customer's live mic/camera state would go stale. Bump on those events to keep the tile honest.
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!room) return;
+    const b = () => bump((n) => n + 1);
+    room.on(RoomEvent.TrackMuted, b).on(RoomEvent.TrackUnmuted, b);
+    return () => {
+      room.off(RoomEvent.TrackMuted, b).off(RoomEvent.TrackUnmuted, b);
+    };
+  }, [room]);
+
+  // The customer is muted when their mic track is muted — or absent (they never enabled a mic).
+  const micMuted = (sid: string) => {
+    const m = micTracks.find((t) => !t.participant.isLocal && t.participant.sid === sid);
+    return !m || (m.publication?.isMuted ?? true);
+  };
 
   return (
     <div className="cams" data-lk-theme="default">
@@ -23,18 +44,25 @@ export function Faces({ media }: { media: ReturnType<typeof useLocalMedia> }) {
             {remotePeople.length > 0 ? "customer connected — camera off" : "waiting for the customer…"}
           </div>
           <span className="cam-tag">CUSTOMER</span>
+          {remotePeople.length > 0 && micMuted(remotePeople[0].sid) && <MuteBadge />}
         </div>
       ) : (
-        remotes.map((t) => (
-          <div className="cam" key={t.participant.sid}>
-            <ParticipantTile trackRef={t} />
-            <span className="cam-tag">CUSTOMER</span>
-            <span className="cam-nm">
-              <span className="sp" />
-              {t.participant.name || t.participant.identity}
-            </span>
-          </div>
-        ))
+        remotes.map((t) => {
+          // A camera the customer turned off can arrive as a muted publication rather than a removed
+          // one; show the placeholder instead of a frozen last frame.
+          const camOff = t.publication?.isMuted ?? false;
+          return (
+            <div className="cam" key={t.participant.sid}>
+              {camOff ? <div className="cam-face">camera off</div> : <ParticipantTile trackRef={t} />}
+              <span className="cam-tag">CUSTOMER</span>
+              <span className="cam-nm">
+                <span className="sp" />
+                {t.participant.name || t.participant.identity}
+              </span>
+              {micMuted(t.participant.sid) && <MuteBadge />}
+            </div>
+          );
+        })
       )}
 
       <div className="cam me">
@@ -64,6 +92,16 @@ export function Faces({ media }: { media: ReturnType<typeof useLocalMedia> }) {
         </span>
       </div>
     </div>
+  );
+}
+
+// Shown on the customer tile when their mic is muted — the rep otherwise has no way to tell.
+function MuteBadge() {
+  return (
+    <span className="cam-mute" title="The customer's microphone is muted">
+      <IconMic off />
+      MUTED
+    </span>
   );
 }
 

@@ -455,8 +455,20 @@ button {
 .cam.me {
   background: var(--lens-2);
 }
+/* LiveKit's tile wrapper has no intrinsic height here (it is not inside a GridLayout), so a
+   height:100% video resolved against it collapsed to the video's own portrait height and the .cam
+   box clipped the top half. Pin the whole chain to fill the .cam box and cover-crop. */
+.cam .lk-participant-tile {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
 .cam video,
 .cam .lk-participant-media-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -500,6 +512,21 @@ button {
   background: rgba(0, 0, 0, 0.45);
   padding: 2px 6px;
   border-radius: var(--r-xs);
+}
+.cam-mute {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+  background: var(--pru);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
 }
 .cam-ctl {
   position: absolute;
