@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { IconArrow, IconLogout } from "../icons";
 import DocumentsInScope from "../DocumentsInScope";
 
@@ -30,7 +31,10 @@ export default function IntroStep({ repName, onStart }: { repName: string; onSta
             {name ? "Ready when you are" : "Signed in"} · nothing is recorded until both parties consent
           </div>
         </div>
-        <button className="pru-btn pru-btn-sm" onClick={logout} style={{ marginLeft: "auto" }} title="Sign out of PRUAssist">
+        <Link href="/knowledge" className="pru-btn pru-btn-sm" style={{ marginLeft: "auto" }} title="Add your own reference material">
+          Knowledge base
+        </Link>
+        <button className="pru-btn pru-btn-sm" onClick={logout} title="Sign out of PRUAssist">
           <IconLogout size={14} /> Log out
         </button>
       </div>

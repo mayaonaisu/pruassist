@@ -44,6 +44,8 @@ const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await im
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
 const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
 const { resolveHotkey } = await import("../src/lib/hotkeys.ts");
+const { chunkLines, toClauses, textToLines } = await import("../src/lib/ingest.ts");
+const { addTextSource, listSources, removeSource, customClauses } = await import("../src/lib/custom-kb.ts");
 const { runOrchestrator } = await import("../src/lib/agent/orchestrator/graph.ts");
 const { handleGuider, agenticLiveEnabled } = await import("../src/lib/agent/orchestrator/handlers.ts");
 const { DRIFT_PAUSE_AFTER, RESETS_DRIFT, loadDrift, recordDrift, clearDrift, judgePausedTurn } = await import("../src/lib/agent/orchestrator/drift.ts");
@@ -1041,4 +1043,63 @@ test("cite: keeps distinct documents as separate rows, in first-seen order", () 
 test("cite: a source with no page part yields the doc with empty pages; empty input yields nothing", () => {
   assert.deepEqual(groupCitations(["Some Brochure"]), [{ doc: "Some Brochure", pages: "" }]);
   assert.deepEqual(groupCitations([]), []);
+});
+
+// --- rep-added knowledge: shaping chunks into cited clauses (toClauses) ---
+test("kb: a link source cites '<doc> · <url>' with sequential non-colliding ids", () => {
+  const cs = toClauses(["first chunk", "second chunk"], { doc: "Panel memo (added)", url: "https://x.test/a", idPrefix: "custom-abc" });
+  assert.equal(cs.length, 2);
+  assert.equal(cs[0].id, "custom-abc-1");
+  assert.equal(cs[1].id, "custom-abc-2");
+  assert.equal(cs[0].source, "Panel memo (added) · https://x.test/a");
+  assert.equal(cs[0].text, "first chunk");
+});
+
+test("kb: a pasted note cites the label alone (no url segment)", () => {
+  const cs = toClauses(["a fact the rep typed"], { doc: "Rate note (added)", idPrefix: "custom-xyz" });
+  assert.equal(cs[0].source, "Rate note (added)");
+});
+
+test("kb: chunkLines joins short lines, splits before exceeding max, drops a sub-minLine tail", () => {
+  assert.deepEqual(chunkLines(["hello", "world"], { target: 700, max: 1000, minLine: 1 }), ["hello world"]);
+  assert.deepEqual(chunkLines(["short"], { minLine: 40 }), []);
+  const big = "x".repeat(600);
+  assert.deepEqual(chunkLines([big, big], { target: 700, max: 1000, minLine: 40 }), [big, big]);
+});
+
+test("kb: textToLines keeps every non-empty line, collapsing inline whitespace", () => {
+  assert.deepEqual(textToLines("  a  b \n\n c \n"), ["a b", "c"]);
+});
+
+// --- rep-added knowledge: the shared store CRUD (text path, against the in-memory store) ---
+test("kb: addTextSource chunks a pasted note into cited clauses and lists it", async () => {
+  const s = await addTextSource({
+    label: "Panel rate note",
+    area: "KB-Test-A",
+    text: "Panel providers unlock the 95% deductible coverage above S$3,500 per policy year, so staying in panel avoids pro-ration.",
+  });
+  try {
+    assert.ok(s.clauses.length >= 1, "should produce at least one clause");
+    assert.match(s.clauses[0].text, /panel/i);
+    assert.match(s.clauses[0].source, /Panel rate note \(added\)/);
+    assert.ok((await listSources()).some((x) => x.id === s.id));
+  } finally {
+    await removeSource(s.id);
+  }
+});
+
+test("kb: customClauses returns a source's clauses only for its own area", async () => {
+  const s = await addTextSource({ label: "n", area: "KB-Test-B", text: "A distinctive fact about panel pro-ration that is long enough to survive chunking into a clause." });
+  try {
+    assert.ok((await customClauses("KB-Test-B")).some((c) => c.id === s.clauses[0].id));
+    assert.ok(!(await customClauses("KB-Test-Other")).some((c) => c.id === s.clauses[0].id));
+  } finally {
+    await removeSource(s.id);
+  }
+});
+
+test("kb: removeSource drops it from the shared list", async () => {
+  const s = await addTextSource({ label: "n", area: "KB-Test-C", text: "Content long enough to chunk into a clause for the removal test to work." });
+  await removeSource(s.id);
+  assert.ok(!(await listSources()).some((x) => x.id === s.id));
 });

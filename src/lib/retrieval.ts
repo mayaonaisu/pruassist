@@ -1,4 +1,5 @@
 import { KNOWLEDGE, areaOfClause, type Clause } from "./knowledge";
+import { customClauses } from "./custom-kb";
 import { cooldownFor, getAi, isInvalidKeyError, keyCount, rotateAfterRateLimit, statusOf, TRANSIENT_STATUS } from "./genai";
 
 // Embedding failures are logged, never swallowed: silent fallback once faked semantic grounding.
@@ -63,6 +64,25 @@ function embedKb() {
   return kbPromise;
 }
 
+// Rep-added clauses change at runtime, so they are embedded on demand and cached by text: a clause
+// is embedded once per process, and an unchanged set costs nothing on later turns.
+const customVecCache = new Map<string, number[] | null>();
+const CUSTOM_CACHE_MAX = 2000;
+async function embedCustom(clauses: Clause[]): Promise<Embedded[]> {
+  const missing = clauses.filter((c) => !customVecCache.has(c.text));
+  if (missing.length) {
+    const vecs = await embedBatch(missing.map((c) => `${c.source}\n${c.text}`), "RETRIEVAL_DOCUMENT");
+    missing.forEach((c, i) => customVecCache.set(c.text, vecs[i]));
+    while (customVecCache.size > CUSTOM_CACHE_MAX) customVecCache.delete(customVecCache.keys().next().value!);
+  }
+  return clauses
+    .map((c) => {
+      const vec = customVecCache.get(c.text);
+      return vec ? { clause: c, vec } : null;
+    })
+    .filter((x): x is Embedded => x !== null);
+}
+
 // Comparing two utterances (not a query to a corpus), memoized because the comprehension
 // signals re-score the same canonical statements on every pass of a live conversation.
 const simCache = new Map<string, number[] | null>();
@@ -122,15 +142,16 @@ export function lexicalSimilarity(a: string, b: string): number {
 }
 
 // Keyword fallback. Scores query coverage, not clause brevity, or short clauses always win.
-function lexical(query: string, k: number, area?: string): Hit[] {
+function lexical(query: string, clauses: Clause[], k: number): Hit[] {
   const q = new Set(tokenize(query));
   if (!q.size) return [];
-  return inArea(KNOWLEDGE, (c) => c, area).map((clause) => {
-    const words = new Set(tokenize(`${clause.source} ${clause.text}`));
-    let overlap = 0;
-    for (const w of q) if (words.has(w)) overlap++;
-    return { ...clause, score: overlap / q.size };
-  })
+  return clauses
+    .map((clause) => {
+      const words = new Set(tokenize(`${clause.source} ${clause.text}`));
+      let overlap = 0;
+      for (const w of q) if (words.has(w)) overlap++;
+      return { ...clause, score: overlap / q.size };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
 }
@@ -148,6 +169,10 @@ function inArea<T>(items: T[], clauseOf: (x: T) => Clause, area?: string): T[] {
 
 // Retrieve the top-k most relevant clauses for a query, optionally scoped to a product area.
 export async function retrieve(query: string, k = 3, area?: string): Promise<Hit[]> {
+  // Rep-added clauses, already scoped to the area, merged in alongside the static corpus.
+  const custom = await customClauses(area).catch(() => [] as Clause[]);
+  const lexCorpus = () => [...inArea(KNOWLEDGE, (c) => c, area), ...custom];
+
   let kb: Embedded[] | null = null;
   try {
     kb = await embedKb();
@@ -159,17 +184,18 @@ export async function retrieve(query: string, k = 3, area?: string): Promise<Hit
   if (kb) {
     const qvec = await embedQuery(query);
     if (qvec) {
-      return inArea(kb, (e) => e.clause, area)
-        .map(({ clause, vec }) => ({ ...clause, score: cosine(qvec, vec) }))
+      const staticHits = inArea(kb, (e) => e.clause, area).map(({ clause, vec }) => ({ ...clause, score: cosine(qvec, vec) }));
+      const customHits = (await embedCustom(custom)).map(({ clause, vec }) => ({ ...clause, score: cosine(qvec, vec) }));
+      return [...staticHits, ...customHits]
         .sort((a, b) => b.score - a.score)
         .slice(0, k)
         .filter((h) => h.score >= MIN_SCORE.vector);
     }
     // Keep the cached corpus: re-embedding every clause would amplify the throttling.
-    return lexical(query, k, area).filter((h) => h.score >= MIN_SCORE.lexical);
+    return lexical(query, lexCorpus(), k).filter((h) => h.score >= MIN_SCORE.lexical);
   }
 
   // The corpus itself failed to embed — allow a retry on the next request.
   kbPromise = null;
-  return lexical(query, k, area).filter((h) => h.score >= MIN_SCORE.lexical);
+  return lexical(query, lexCorpus(), k).filter((h) => h.score >= MIN_SCORE.lexical);
 }

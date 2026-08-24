@@ -1797,3 +1797,41 @@ button {
   opacity: 0.5;
   cursor: default;
 }
+
+/* ============ knowledge base manager ============ */
+.kb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--card);
+}
+.kb-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pencil);
+  margin-top: 3px;
+}
+.kb-url {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 11.5px;
+  color: var(--slate);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
