@@ -18,6 +18,9 @@ export type SummaryData = {
   talkingPoints: string[];
   followUps: string[];
   notes: string;
+  // False when the AI summary service failed to produce a brief — distinct from a brief that is
+  // genuinely empty because nothing was said. The Understanding Record does not depend on it.
+  briefGenerated: boolean;
   stats: Stats;
   durationMin: number;
   // The Understanding Record: one row per material concept, with the customer's own words as

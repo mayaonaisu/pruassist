@@ -92,6 +92,9 @@ export default function SummaryStep({
       "PRUAssist — Advisor Session Brief",
       `${productArea} · ${summary.durationMin} min`,
       "",
+      summary.briefGenerated
+        ? ""
+        : "(The automated brief could not be generated for this session — the AI summary service was unavailable. The Understanding Record below is unaffected.)\n",
       recordBlock,
       block("Key customer concerns:", summary.concerns),
       block("Talking points:", summary.talkingPoints),
@@ -140,14 +143,30 @@ export default function SummaryStep({
 
       <UnderstandingRecord rows={summary.record} signedBy={summary.signedBy} customerName={summary.customerName} />
 
-      <Section title="What the customer raised" items={summary.concerns} />
-      <Section title="Lines suggested to you" items={summary.talkingPoints} said />
-      <Section title="Still open" items={summary.followUps} />
+      {summary.briefGenerated ? (
+        <>
+          <Section title="What the customer raised" items={summary.concerns} />
+          <Section title="Lines suggested to you" items={summary.talkingPoints} said />
+          <Section title="Still open" items={summary.followUps} />
+        </>
+      ) : (
+        <div className="sec">
+          <div className="sec-h">Session brief</div>
+          <p className="notice bad" style={{ fontSize: 13 }}>
+            The written brief couldn’t be generated — the AI summary service was unavailable. This does
+            not affect the Understanding Record above or your session stats: both are built from the live
+            session, not this summary, and can still be exported.
+          </p>
+        </div>
+      )}
 
       <div className="sec">
         <div className="sec-h">Notes</div>
         <p className="pru-muted" style={{ fontSize: 13.5, lineHeight: 1.65, marginBottom: 14 }}>
-          {summary.notes || "No automated notes captured."}
+          {summary.notes ||
+            (summary.briefGenerated
+              ? "No automated notes captured."
+              : "The brief couldn’t be generated, so there are no automated notes.")}
         </p>
         <label htmlFor="rep-notes" className="pru-eyebrow" style={{ display: "block", marginBottom: 7 }}>
           Your notes

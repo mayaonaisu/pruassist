@@ -8,7 +8,7 @@ import LiveStep from "./steps/LiveStep";
 import SummaryStep from "./steps/SummaryStep";
 import type { Comprehension, SessionInfo, Stats, SummaryData } from "@/lib/console-types";
 
-type Narrative = Pick<SummaryData, "concerns" | "talkingPoints" | "followUps" | "notes">;
+type Narrative = Pick<SummaryData, "concerns" | "talkingPoints" | "followUps" | "notes" | "briefGenerated">;
 
 function toSummary(raw: unknown): Narrative {
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -18,6 +18,8 @@ function toSummary(raw: unknown): Narrative {
     talkingPoints: arr(o.talkingPoints),
     followUps: arr(o.followUps),
     notes: typeof o.notes === "string" ? o.notes : "",
+    // Only an explicit false counts as a failure; a missing flag from an older shape stays optimistic.
+    briefGenerated: o.generated !== false,
   };
 }
 
@@ -40,7 +42,7 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
           body: JSON.stringify({ roomId: session.roomId }),
         }).catch(() => {});
       }
-      let data: Narrative = { concerns: [], talkingPoints: [], followUps: [], notes: "" };
+      let data: Narrative = { concerns: [], talkingPoints: [], followUps: [], notes: "", briefGenerated: true };
       try {
         const res = await fetch("/api/summary", {
           method: "POST",
@@ -48,9 +50,12 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
           body: JSON.stringify({ transcript: transcriptText }),
         });
         // The summary screen maps over these arrays, so a bad shape would white-screen the console.
+        // A non-OK response with a real transcript is a generation failure, not a quiet session.
         if (res.ok) data = toSummary(await res.json());
+        else if (transcriptText.trim()) data = { ...data, briefGenerated: false };
       } catch {
-        /* keep empty summary */
+        // Couldn't reach the service — a failure only if there was something to summarise.
+        if (transcriptText.trim()) data = { ...data, briefGenerated: false };
       }
       // The record is the rep's own signed artifact, so it is signed with the consent signature
       // they typed at the start of this session — not with a name the server assumed.
