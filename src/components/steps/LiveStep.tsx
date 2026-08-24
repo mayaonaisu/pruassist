@@ -12,7 +12,7 @@ import { useTranscript } from "@/lib/useTranscript";
 import { resolveHotkey } from "@/lib/hotkeys";
 import { groupCitations, transcriptText, type Line } from "@/lib/transcript";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
-import type { Alert, ConceptState } from "@/lib/agent/types";
+import type { Alert } from "@/lib/agent/types";
 
 export default function LiveStep({
   repName,
@@ -188,6 +188,16 @@ function LiveConsole({
         <span className="c-ctx">
           {session.productArea} · <b>{consent ? consent.name : "awaiting customer"}</b>
         </span>
+        {/* Honesty about the mode: when embeddings are unavailable the detectors fall back to keyword
+            overlap, which is less precise. CONTEXT.md promises the console says so. */}
+        {agent.degraded && (
+          <span
+            className="degraded-tag"
+            title="Embeddings are unavailable, so the assistant is matching on keywords only — detection is less precise this session."
+          >
+            Reduced accuracy · keyword matching
+          </span>
+        )}
         <span className="c-r">
           <button className="pru-btn pru-btn-sm" onClick={copy}>
             {copied ? "✓ Link copied" : "Copy customer link"}
@@ -214,56 +224,6 @@ function LiveConsole({
 
       <div className="c-top">
         <Faces media={media} />
-        <div className={`c-meta${agent.readiness ? "" : " idle"}`}>
-          {/* Honesty about the mode: when embeddings are unavailable the detectors fall back to
-              keyword overlap, which is less precise. CONTEXT.md promises the console says so. */}
-          {agent.degraded && (
-            <div
-              className="degraded-tag"
-              title="Embeddings are unavailable, so the assistant is matching on keywords only — detection is less precise this session."
-            >
-              Reduced accuracy · keyword matching
-            </div>
-          )}
-          {/* What still stands between the representative and a recommendation. Until a comparison
-              is in play there is nothing to show, so the panel recedes to a single quiet line
-              rather than a full bordered box competing with the video and the line. */}
-          {!agent.readiness ? (
-            <p className="ready-idle">Readiness appears here once you start comparing options.</p>
-          ) : (
-            <>
-              <div className="strip-h">{agent.readiness.question ?? "Ready to recommend"}</div>
-              <div className="ready-rows pru-scroll">
-                {agent.readiness.standing.map((s) => (
-                  <div key={s.conceptId} className={`ready-row ready-${s.state}`}>
-                    <span className="ready-label">{s.label}</span>
-                    <span className="ready-state">{READY_STATE[s.state]}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="ready-foot">
-                {agent.readiness.ready ? (
-                  <span className="ready-go">Ready to recommend</span>
-                ) : (
-                  <>
-                    <span className="ready-count">
-                      {agent.readiness.settled} / {agent.readiness.total} settled
-                    </span>
-                    {agent.readiness.nextConceptId && (
-                      <button
-                        className="ghost"
-                        title={agent.readiness.nextQuestion ?? undefined}
-                        onClick={() => comprehension.act("teach-back-asked", agent.readiness!.nextConceptId!)}
-                      >
-                        Ask it
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            </>
-          )}
-        </div>
       </div>
 
       {/* COMPREHENSION — evidence about the customer, never a verdict, and never blocking.
@@ -592,13 +552,4 @@ const ALERT_CAT: Record<Alert["kind"], string> = {
   divergence: "Qualifier dropped",
   "re-ask": "Asked again",
   "explain-back": "Teach-back graded",
-};
-
-// The ledger state, in words a representative reads at a glance mid-conversation.
-const READY_STATE: Record<ConceptState, string> = {
-  unseen: "not raised",
-  raised: "explained",
-  asserted: "agreed only",
-  demonstrated: "shown",
-  misunderstood: "wrong",
 };
