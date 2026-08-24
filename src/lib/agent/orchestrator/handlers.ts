@@ -2,6 +2,7 @@ import { conceptsForArea } from "../../concepts";
 import { retrieve, type Hit } from "../../retrieval";
 import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "../gemini";
 import { clauseBlock, comparisonSystemInstruction, guidanceSystemInstruction, HOUSE_RULES, pointerSystemInstruction, POSTURE } from "../prompts";
+import { groqEnabled, groqGatherClauses, groqGenerateRaw } from "../groq";
 import { activeDecision, readinessFor } from "../readiness";
 import { runToolLoop } from "../tools";
 import { conceptsMentioned } from "../utterance";
@@ -36,25 +37,28 @@ export const agenticLiveEnabled = (): boolean => process.env.PRUASSIST_AGENTIC_L
 // or an empty gather must never leave the rep with nothing when a straight lookup would have found one.
 async function gatherClauses(input: OrchestratorInput, hint?: string): Promise<Hit[]> {
   if (!agenticLiveEnabled()) return retrieve(input.transcript, 3, input.scope);
-  const gathered = await runToolLoop(
-    GATHER_INSTRUCTION,
+  const task =
     `The representative is discussing ${input.scope}.${hint ? ` ${hint}` : ""} Recent conversation:\n` +
-      `${input.transcript}\n\nGather the clauses that answer the customer's latest turn, then stop.`,
-    { state: input.state, productArea: input.scope },
-    // Live path: rotate keys under a rate limit, never sleep — the rep is waiting inside maxDuration.
-    // One step with thinking off keeps the agentic gather (the model still picks the query) fast
-    // enough for a live turn; a full loop with dynamic thinking was 13s+ and hit the function budget.
-    { allowSleep: false, maxSteps: 1, think: "off" },
-  );
+    `${input.transcript}\n\nGather the clauses that answer the customer's latest turn, then stop.`;
+  const ctx = { state: input.state, productArea: input.scope };
+  // Groq (fast) when enabled; otherwise the Gemini tool loop. Both fall back to a plain retrieve so
+  // an empty or failed gather never leaves the rep with nothing.
+  if (groqEnabled()) {
+    const cited = await groqGatherClauses(GATHER_INSTRUCTION, task, ctx, 2);
+    return cited.length ? cited : retrieve(input.transcript, 3, input.scope);
+  }
+  // Live path: rotate keys under a rate limit, never sleep — the rep is waiting inside maxDuration.
+  // One step with thinking off keeps the agentic gather (the model still picks the query) fast
+  // enough for a live turn; a full loop with dynamic thinking was 13s+ and hit the function budget.
+  const gathered = await runToolLoop(GATHER_INSTRUCTION, task, ctx, { allowSleep: false, maxSteps: 1, think: "off" });
   if (gathered && gathered.run.cited.length) return gathered.run.cited;
   return retrieve(input.transcript, 3, input.scope);
 }
 
-async function generate(
-  instruction: string,
-  hits: Hit[],
-  transcript: string,
-): Promise<{ pointers: Pointers; unsupportedFigures: string[] } | null> {
+// Provider-branched raw JSON getter: Groq (fast, OpenAI-compatible) or Gemini. The caller shapes the
+// result into Pointers identically, so the grounding checks stay shared across providers.
+async function generateRaw(instruction: string, hits: Hit[], transcript: string): Promise<string | null> {
+  if (groqEnabled()) return groqGenerateRaw(instruction, clauseBlock(hits), transcript);
   const response = await callWithRetry(
     "orchestrator",
     (ai) =>
@@ -71,13 +75,22 @@ async function generate(
       }),
     { allowSleep: false },
   );
-  if (!response) return null;
+  return response ? (response.text ?? "") : null;
+}
+
+async function generate(
+  instruction: string,
+  hits: Hit[],
+  transcript: string,
+): Promise<{ pointers: Pointers; unsupportedFigures: string[] } | null> {
+  const raw = await generateRaw(instruction, hits, transcript);
+  if (raw === null) return null;
 
   let p: Record<string, unknown> = {};
   try {
-    p = JSON.parse((response.text ?? "").trim());
+    p = JSON.parse(raw.trim());
   } catch {
-    p = { explainer: (response.text ?? "").trim() };
+    p = { explainer: raw.trim() };
   }
   const pointers: Pointers = {
     concern: str(p.concern),

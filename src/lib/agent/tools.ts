@@ -75,7 +75,7 @@ function ledgerDigest(state: AgentState): string {
   return rows.join("\n");
 }
 
-async function runTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<{ result: unknown; cited: Hit[] }> {
+export async function runTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<{ result: unknown; cited: Hit[] }> {
   switch (name) {
     case "search_policy": {
       const query = typeof args.query === "string" ? args.query : "";
