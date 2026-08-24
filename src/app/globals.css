@@ -456,18 +456,13 @@ button {
   gap: 12px;
   min-height: 0;
 }
-/* In the rail the two faces stack and fill the width; the rep's self-view is smaller because the
-   customer's face is what the rep reads. */
+/* In the rail the two faces stack and fill the width, both 16:9. */
 .call-rail .cams {
   flex-direction: column;
   width: 100%;
 }
 .call-rail .cam {
   width: 100%;
-}
-.call-rail .cam.me {
-  aspect-ratio: auto;
-  height: clamp(84px, 12vh, 116px);
 }
 /* The transcript fills the rest of the rail; the context dock sits under it. */
 .call-rail .pane.tr {
@@ -1575,17 +1570,13 @@ button {
   .call-rail {
     width: auto;
   }
-  /* Full width again, so the faces go back to a row and the rep's self-view resumes 16:9. */
+  /* Full width again, so the faces go back to a row. */
   .call-rail .cams {
     flex-direction: row;
   }
   .call-rail .cam {
     flex: 1;
     width: auto;
-  }
-  .call-rail .cam.me {
-    aspect-ratio: 16 / 9;
-    height: auto;
   }
   .call-rail .pane.tr {
     flex: none;
