@@ -10,7 +10,7 @@ import { useLocalMedia } from "@/lib/useLocalMedia";
 import { usePointers } from "@/lib/usePointers";
 import { useTranscript } from "@/lib/useTranscript";
 import { resolveHotkey } from "@/lib/hotkeys";
-import { transcriptText } from "@/lib/transcript";
+import { groupCitations, transcriptText, type Line } from "@/lib/transcript";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
 import type { Alert, ConceptState } from "@/lib/agent/types";
 
@@ -83,7 +83,7 @@ function LiveConsole({
   const room = useRoomContext();
   const media = useLocalMedia(room);
 
-  const { lines, interim, speech, latest } = useTranscript(room, repName, media.mic === "on");
+  const { lines, interim, speech, latest, editLine } = useTranscript(room, repName, media.mic === "on");
   const consent = useConsent(session.roomId);
 
   const [auto, setAuto] = useState(true);
@@ -214,7 +214,7 @@ function LiveConsole({
 
       <div className="c-top">
         <Faces media={media} />
-        <div className="c-meta">
+        <div className={`c-meta${agent.readiness ? "" : " idle"}`}>
           {/* Honesty about the mode: when embeddings are unavailable the detectors fall back to
               keyword overlap, which is less precise. CONTEXT.md promises the console says so. */}
           {agent.degraded && (
@@ -225,15 +225,14 @@ function LiveConsole({
               Reduced accuracy · keyword matching
             </div>
           )}
-          {/* What still stands between the representative and a recommendation. This replaced a
-              strip of bars derived from a handful of timestamps — real ledger state, same slot. */}
-          <div className="strip-h">{agent.readiness?.question ?? "Ready to recommend"}</div>
+          {/* What still stands between the representative and a recommendation. Until a comparison
+              is in play there is nothing to show, so the panel recedes to a single quiet line
+              rather than a full bordered box competing with the video and the line. */}
           {!agent.readiness ? (
-            <p className="ready-idle">
-              Once you start comparing options, what the customer still needs to understand appears here.
-            </p>
+            <p className="ready-idle">Readiness appears here once you start comparing options.</p>
           ) : (
             <>
+              <div className="strip-h">{agent.readiness.question ?? "Ready to recommend"}</div>
               <div className="ready-rows pru-scroll">
                 {agent.readiness.standing.map((s) => (
                   <div key={s.conceptId} className={`ready-row ready-${s.state}`}>
@@ -288,9 +287,7 @@ function LiveConsole({
             </div>
             <div className="cite">
               <b>Grounded in</b>
-              {agent.alert.citations.map((s, i) => (
-                <span key={i}>{s}</span>
-              ))}
+              <Citations sources={agent.alert.citations} />
             </div>
           </div>
           <div className="say-actions">
@@ -388,7 +385,7 @@ function LiveConsole({
               <div className="cite">
                 <b>Grounded in</b>
                 {result.sources.length ? (
-                  result.sources.map((s, i) => <span key={i}>{s.source}</span>)
+                  <Citations sources={result.sources.map((s) => s.source)} />
                 ) : (
                   <span>no source returned</span>
                 )}
@@ -451,14 +448,11 @@ function LiveConsole({
           <div ref={feedRef} className="tr-body">
             {lines.length === 0 && Object.values(visibleInterim).every((v) => !v) && (
               <p className="pru-muted" style={{ fontSize: 12 }}>
-                Appears here as you and the customer speak.
+                Appears here as you and the customer speak. Double-click a line to correct a mis-hearing.
               </p>
             )}
             {lines.slice(-12).map((l) => (
-              <div key={l.id} className={`tr-line ${l.speaker === repName ? "" : "cust"}`}>
-                <span className="who">{l.speaker === repName ? "YOU" : l.speaker.toUpperCase()}</span>
-                {l.flag ? <span className="mark">{l.text}</span> : l.text}
-              </div>
+              <TranscriptLine key={l.id} line={l} isRep={l.speaker === repName} onEdit={editLine} />
             ))}
             {Object.entries(visibleInterim).map(([sp, txt]) =>
               txt ? (
@@ -471,6 +465,85 @@ function LiveConsole({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Citations for the line, collapsed to one row per document (pages merged) so the sidebar stops
+// repeating the full brochure name on every page reference.
+function Citations({ sources }: { sources: string[] }) {
+  return (
+    <>
+      {groupCitations(sources).map((g, i) => (
+        <span key={i}>
+          {g.doc}
+          {g.pages ? <span className="cite-pp"> · {g.pages}</span> : null}
+        </span>
+      ))}
+    </>
+  );
+}
+
+// One transcript line the rep can correct in place. The browser mishears brand terms and names;
+// double-click to edit, Enter saves, Esc cancels — the fix flows to the record and downstream readers.
+function TranscriptLine({ line, isRep, onEdit }: { line: Line; isRep: boolean; onEdit: (id: string, text: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(line.text);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    if (draft.trim() && draft.trim() !== line.text) onEdit(line.id, draft);
+  };
+  const cancel = () => {
+    setEditing(false);
+    setDraft(line.text);
+  };
+
+  if (editing) {
+    return (
+      <div className={`tr-line ${isRep ? "" : "cust"} editing`}>
+        <span className="who">{isRep ? "YOU" : line.speaker.toUpperCase()}</span>
+        <textarea
+          ref={inputRef}
+          className="tr-edit"
+          rows={2}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          aria-label="Correct this transcript line"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`tr-line ${isRep ? "" : "cust"}`}
+      onDoubleClick={() => {
+        setDraft(line.text);
+        setEditing(true);
+      }}
+      title="Double-click to correct a mis-hearing"
+    >
+      <span className="who">{isRep ? "YOU" : line.speaker.toUpperCase()}</span>
+      {line.flag ? <span className="mark">{line.text}</span> : line.text}
     </div>
   );
 }

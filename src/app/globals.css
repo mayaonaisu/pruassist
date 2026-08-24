@@ -578,6 +578,17 @@ button {
   flex-direction: column;
   min-width: 180px;
 }
+/* Nothing to show until a comparison is in play — recede to a quiet centred line rather than a full
+   box, so the idle readiness panel stops competing with the video and the suggested line. */
+.c-meta.idle {
+  justify-content: center;
+  background: transparent;
+  border-style: dashed;
+}
+.c-meta.idle .ready-idle {
+  text-align: center;
+  margin: 0;
+}
 .strip-h {
   font-family: var(--font-mono);
   font-size: 8.5px;
@@ -1090,6 +1101,30 @@ button {
 }
 .tr-line.now .who {
   color: var(--pru);
+}
+/* A final line is correctable: hint on hover, and swap to a small editor in place while editing. */
+.tr-line[title]:hover {
+  background: var(--brochure-2);
+  border-radius: var(--r-xs);
+  cursor: text;
+}
+.tr-edit {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-xs);
+  padding: 4px 6px;
+  resize: vertical;
+}
+/* Deduped citation pages, set quiet next to the document name. */
+.cite-pp {
+  color: var(--pencil);
 }
 
 /* ============ landing ============ */

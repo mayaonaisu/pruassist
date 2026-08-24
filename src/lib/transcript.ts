@@ -1,4 +1,5 @@
 import type { Turn } from "./agent/types";
+import { fixTerms } from "./terms";
 
 // The transcript, as pure data. No React, no fetch — so the rules that decide what gets sent to
 // the server can be checked without a browser, a LiveKit room and two cameras.
@@ -41,6 +42,34 @@ export function lastFromCustomer(lines: Line[], repName: string): string {
     if (lines[i].speaker !== repName) return lines[i].text;
   }
   return "";
+}
+
+// The rep can correct a mis-heard line in place. The corrected text is normalised the same way a
+// freshly-heard one is (fixTerms), so the invariant "every stored line is canonicalised" still
+// holds. Blanking a line is ignored rather than treated as a delete, and an unknown id is a no-op.
+export function applyLineEdit(lines: Line[], id: string, text: string): Line[] {
+  const next = fixTerms(text.trim());
+  if (!next) return lines; // blanking a line is ignored, not a delete
+  return lines.map((l) => (l.id === id ? { ...l, text: next } : l));
+}
+
+// Collapse a suggested line's citations for display: one row per document, its pages merged and
+// de-duplicated in first-seen order — the sidebar was repeating the full brochure name on every row.
+export function groupCitations(sources: string[]): { doc: string; pages: string }[] {
+  const order: string[] = [];
+  const byDoc = new Map<string, string[]>();
+  for (const src of sources) {
+    const [doc, ...rest] = src.split(" · ");
+    if (!byDoc.has(doc)) {
+      byDoc.set(doc, []);
+      order.push(doc);
+    }
+    const pages = byDoc.get(doc)!;
+    for (const p of rest.join(" · ").split(",").map((x) => x.trim()).filter(Boolean)) {
+      if (!pages.includes(p)) pages.push(p);
+    }
+  }
+  return order.map((doc) => ({ doc, pages: byDoc.get(doc)!.join(", ") }));
 }
 
 // The window, not just the new lines: re-ask and divergence both need what came before.

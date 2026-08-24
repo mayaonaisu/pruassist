@@ -5,7 +5,7 @@ import { RoomEvent } from "livekit-client";
 import type { Room } from "livekit-client";
 import { useBrowserSpeech, type SpeechResult, type SpeechStatus } from "./useBrowserSpeech";
 import { deepgramEnabled, useDeepgramSpeech, type DeepgramStatus } from "./useDeepgramSpeech";
-import { looksLikeQuestion, type Line } from "./transcript";
+import { applyLineEdit, looksLikeQuestion, type Line } from "./transcript";
 import { fixTerms } from "./terms";
 
 // Deepgram statuses that mean "it isn't working — use Web Speech instead". A mic denial is not one:
@@ -35,6 +35,8 @@ export type Transcript = {
   speech: ReturnType<typeof useBrowserSpeech>;
   // The freshest lines, for callbacks that must not close over a stale render.
   latest: () => Line[];
+  // The rep corrects a mis-heard line in place; the fix flows to the record and downstream readers.
+  editLine: (id: string, text: string) => void;
 };
 
 export function useTranscript(room: Room | undefined, repName: string, micEnabled: boolean): Transcript {
@@ -100,5 +102,9 @@ export function useTranscript(room: Room | undefined, repName: string, micEnable
 
   const latest = useCallback(() => linesRef.current, []);
 
-  return { lines, interim, speech, latest };
+  const editLine = useCallback((id: string, text: string) => {
+    setLines((prev) => applyLineEdit(prev, id, text));
+  }, []);
+
+  return { lines, interim, speech, latest, editLine };
 }

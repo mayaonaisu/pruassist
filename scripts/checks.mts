@@ -39,7 +39,7 @@ const { prepare, runSignals } = await import("../src/lib/agent/signals.ts");
 const { detectAssent, detectDivergence, detectLatency, detectRaised, detectReAsk, detectUptake } = await import("../src/lib/agent/detectors.ts");
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
-const { lastFromCustomer, newestAt, toTurns, windowToSend } = await import("../src/lib/transcript.ts");
+const { lastFromCustomer, newestAt, toTurns, windowToSend, applyLineEdit, groupCitations } = await import("../src/lib/transcript.ts");
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
 const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
@@ -985,4 +985,60 @@ test("hotkey: a modifier combo is left to the browser (Ctrl+R must still reload)
 test("hotkey: an unmapped key does nothing", () => {
   assert.equal(resolveHotkey({ key: "q" }), null);
   assert.equal(resolveHotkey({ key: " " }), null);
+});
+
+// --- rep edits a mis-heard transcript line (applyLineEdit) ---
+const LINES = [
+  { id: "a", at: 1, speaker: "You", text: "hello there" },
+  { id: "b", at: 2, speaker: "Naomi", text: "what is pro shield", flag: true },
+];
+
+test("edit: replaces the matching line's text, leaves the rest untouched", () => {
+  const out = applyLineEdit(LINES, "a", "hello, good morning");
+  assert.equal(out.find((l) => l.id === "a")!.text, "hello, good morning");
+  assert.equal(out.find((l) => l.id === "b")!.text, "what is pro shield");
+});
+
+test("edit: trims and normalises brand terms, like a freshly-heard line", () => {
+  const out = applyLineEdit(LINES, "b", "  what does pro shield cover?  ");
+  assert.equal(out.find((l) => l.id === "b")!.text, "what does PRUShield cover?");
+});
+
+test("edit: blanking a line is ignored (no empty lines), unknown id is a no-op", () => {
+  assert.deepEqual(applyLineEdit(LINES, "a", "   "), LINES);
+  assert.deepEqual(applyLineEdit(LINES, "missing", "hi there"), LINES);
+});
+
+test("edit: preserves id, timestamp, speaker and the question flag", () => {
+  const out = applyLineEdit(LINES, "b", "what does pro shield cover?");
+  const b = out.find((l) => l.id === "b")!;
+  assert.equal(b.id, "b");
+  assert.equal(b.at, 2);
+  assert.equal(b.speaker, "Naomi");
+  assert.equal(b.flag, true);
+});
+
+// --- deduped citation sidebar (groupCitations) ---
+test("cite: one row per document, pages merged and de-duplicated in order", () => {
+  const out = groupCitations([
+    "PRUShield Product Brochure (Apr 2026) · p.3",
+    "PRUShield Product Brochure (Apr 2026) · p.6, p.10",
+    "PRUShield Product Brochure (Apr 2026) · p.2, p.6",
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].doc, "PRUShield Product Brochure (Apr 2026)");
+  assert.equal(out[0].pages, "p.3, p.6, p.10, p.2");
+});
+
+test("cite: keeps distinct documents as separate rows, in first-seen order", () => {
+  const out = groupCitations(["Doc B · p.1", "Doc A · p.9", "Doc B · p.2"]);
+  assert.deepEqual(out, [
+    { doc: "Doc B", pages: "p.1, p.2" },
+    { doc: "Doc A", pages: "p.9" },
+  ]);
+});
+
+test("cite: a source with no page part yields the doc with empty pages; empty input yields nothing", () => {
+  assert.deepEqual(groupCitations(["Some Brochure"]), [{ doc: "Some Brochure", pages: "" }]);
+  assert.deepEqual(groupCitations([]), []);
 });
