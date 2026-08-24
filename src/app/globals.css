@@ -683,7 +683,18 @@ button {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  /* A long suggested line must scroll INSIDE the card, not spill out. `justify-content: center`
+     centred tall content and let it bleed onto the video row above and the support/transcript row
+     below; the auto-margins below re-create that centring only when the content actually fits. */
+  overflow-y: auto;
+}
+/* Centre the content when it is shorter than the card; collapse to a top-aligned scroll when it is
+   taller (auto margins go to 0, and the top stays reachable — unlike justify-content). */
+.line-block > :first-child {
+  margin-top: auto;
+}
+.line-block > :last-child {
+  margin-bottom: auto;
 }
 .lb-head {
   display: flex;
