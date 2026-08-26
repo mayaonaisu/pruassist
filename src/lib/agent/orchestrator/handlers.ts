@@ -7,6 +7,7 @@ import { activeDecision, readinessFor } from "../readiness";
 import { runToolLoop } from "../tools";
 import { conceptsMentioned } from "../utterance";
 import { unsupportedFigures } from "../verify";
+import { runGeneration } from "./generation";
 import type { OrchestratorInput, OrchestratorResult, Pointers } from "./types";
 
 // The mode handlers. The generating ones (policy / comparison / guider) run the two-phase pattern:
@@ -35,7 +36,7 @@ export const agenticLiveEnabled = (): boolean => process.env.PRUASSIST_AGENTIC_L
 // Phase 1 of the generating path: let the model choose what to retrieve. Falls back to the plain
 // deterministic retrieve the handlers used before — the flag being off, a null loop (no Gemini key),
 // or an empty gather must never leave the rep with nothing when a straight lookup would have found one.
-async function gatherClauses(input: OrchestratorInput, hint?: string): Promise<Hit[]> {
+export async function gatherClauses(input: OrchestratorInput, hint?: string): Promise<Hit[]> {
   if (!agenticLiveEnabled()) return retrieve(input.transcript, 3, input.scope);
   const task =
     `The representative is discussing ${input.scope}.${hint ? ` ${hint}` : ""} Recent conversation:\n` +
@@ -111,32 +112,44 @@ async function generate(
 }
 
 export async function handlePolicyGuidance(input: OrchestratorInput, preGathered?: Hit[]): Promise<OrchestratorResult> {
-  // preGathered lets the comparison handler reuse the clauses it already gathered instead of paying
-  // for a second tool loop; the graph calls this with one argument, so it gathers for itself.
-  const hits = preGathered ?? (await gatherClauses(input));
-  if (!hits.length) return { mode: "policy_guidance", note: NO_CLAUSE_NOTE };
-  const gen = await generate(pointerSystemInstruction(input.scope), hits, input.transcript);
-  if (!gen) return { mode: "policy_guidance", note: RATE_LIMIT_NOTE };
-  return { mode: "policy_guidance", pointers: gen.pointers, sources: sourcesOf(hits), unsupportedFigures: gen.unsupportedFigures };
+  if (preGathered?.length) {
+    // Pre-gathered hits from speculative parallel gather — skip the subgraph's gather step and
+    // run a single generate+verify pass. The pre-gather already searched; re-searching for a retry
+    // is not worth the latency when the hits were free.
+    const gen = await generate(pointerSystemInstruction(input.scope), preGathered, input.transcript);
+    if (!gen) return { mode: "policy_guidance", note: RATE_LIMIT_NOTE };
+    return { mode: "policy_guidance", pointers: gen.pointers, sources: sourcesOf(preGathered), unsupportedFigures: gen.unsupportedFigures };
+  }
+  const result = await runGeneration(
+    input,
+    pointerSystemInstruction(input.scope),
+    gatherClauses,
+    (instr, hits, transcript) => generate(instr, hits, transcript),
+  );
+  if (!result.hits.length) return { mode: "policy_guidance", note: NO_CLAUSE_NOTE };
+  if (!result.pointers) return { mode: "policy_guidance", note: RATE_LIMIT_NOTE };
+  return { mode: "policy_guidance", pointers: result.pointers, sources: sourcesOf(result.hits), unsupportedFigures: result.unsupported };
 }
 
 export async function handleComparison(input: OrchestratorInput): Promise<OrchestratorResult> {
   const decision = activeDecision(input.state);
-  const hits = await gatherClauses(input, decision ? `The customer is weighing: ${decision.question}` : undefined);
-  // No clauses or no active decision — fall back to a plain grounded answer, reusing what we
-  // gathered rather than running the tool loop again.
-  if (!hits.length || !decision) return handlePolicyGuidance(input, hits);
-  const gen = await generate(
-    comparisonSystemInstruction(decision, readinessFor(decision, input.state), input.scope),
-    hits,
-    input.transcript,
+  const hint = decision ? `The customer is weighing: ${decision.question}` : undefined;
+  const result = await runGeneration(
+    input,
+    decision
+      ? comparisonSystemInstruction(decision, readinessFor(decision, input.state), input.scope)
+      : pointerSystemInstruction(input.scope),
+    gatherClauses,
+    (instr, hits, transcript) => generate(instr, hits, transcript),
+    hint,
   );
-  if (!gen) return { mode: "comparison", note: RATE_LIMIT_NOTE };
+  if (!result.hits.length || !decision) return handlePolicyGuidance(input, result.hits);
+  if (!result.pointers) return { mode: "comparison", note: RATE_LIMIT_NOTE };
   return {
     mode: "comparison",
-    pointers: gen.pointers,
-    sources: sourcesOf(hits),
-    unsupportedFigures: gen.unsupportedFigures,
+    pointers: result.pointers,
+    sources: sourcesOf(result.hits),
+    unsupportedFigures: result.unsupported,
     comparing: true,
   };
 }

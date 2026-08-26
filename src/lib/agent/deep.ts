@@ -14,7 +14,7 @@ import type { AgentState, Turn } from "./types";
 
 // One pass per room per this interval. The deep pass costs embedding calls, and a rapid-fire
 // conversation would otherwise fan out one pass per utterance.
-const MIN_INTERVAL_MS = 5_000;
+const MIN_INTERVAL_MS = 2_000;
 
 // Lookahead is the expensive stage, and the answer it prepares stays useful for a while. This is
 // the ceiling on how often it may run per room, independent of how often the ledger changes.

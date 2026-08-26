@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RoomEvent } from "livekit-client";
 import type { Room } from "livekit-client";
 import { useBrowserSpeech, type SpeechResult, type SpeechStatus } from "./useBrowserSpeech";
@@ -39,31 +39,27 @@ export type Transcript = {
   editLine: (id: string, text: string) => void;
 };
 
-export function useTranscript(room: Room | undefined, repName: string, micEnabled: boolean): Transcript {
-  const [lines, setLines] = useState<Line[]>([]);
-  const [interim, setInterim] = useState<Record<string, string>>({});
+// The local-mic STT hooks (Deepgram / Web Speech) must live ABOVE the LiveKitRoom provider so a
+// room reconnect does not kill the WS mid-handshake and restart from scratch. This hook owns only
+// the speech-to-text decision; useTranscript below wires it into the shared line store together
+// with the remote data-channel listener that does need the room.
+export function useLocalSpeech(repName: string, micEnabled: boolean) {
+  const [localLines, setLocalLines] = useState<Line[]>([]);
+  const [localInterim, setLocalInterim] = useState<Record<string, string>>({});
   const idRef = useRef(0);
-  const linesRef = useRef<Line[]>([]);
-
-  useEffect(() => {
-    linesRef.current = lines;
-  }, [lines]);
 
   const addFinal = useCallback((speaker: string, text: string, flag = false) => {
-    // Correct mis-heard domain terms once, here, so every downstream reader (display, the guider's
-    // concept gate, retrieval, the detectors) sees "PRUShield", not "pru shield".
     const fixed = fixTerms(text.trim());
     if (!fixed) return;
     const at = Date.now();
-    setLines((prev) => [...prev.slice(-MAX_LINES), { id: `${at}-${idRef.current++}`, at, speaker, text: fixed, flag }]);
-    setInterim((prev) => ({ ...prev, [speaker]: "" }));
+    setLocalLines((prev) => [...prev.slice(-MAX_LINES), { id: `${at}-${idRef.current++}`, at, speaker, text: fixed, flag }]);
+    setLocalInterim((prev) => ({ ...prev, [speaker]: "" }));
   }, []);
 
   const setSpeakerInterim = useCallback((speaker: string, text: string) => {
-    setInterim((prev) => ({ ...prev, [speaker]: fixTerms(text) }));
+    setLocalInterim((prev) => ({ ...prev, [speaker]: fixTerms(text) }));
   }, []);
 
-  // Muting must pause transcription too, or "Mute" keeps feeding the rep's words to the AI.
   const onSpeech = useCallback(
     ({ final, interim: itm }: SpeechResult) => {
       if (final) addFinal(repName, final);
@@ -72,13 +68,29 @@ export function useTranscript(room: Room | undefined, repName: string, micEnable
     [addFinal, setSpeakerInterim, repName],
   );
 
-  // Deepgram (with brand-term boosting) when enabled and working; otherwise the browser recognizer.
-  // Both hooks are always called (Rules of Hooks); each no-ops unless its enabled flag is true.
   const wantDeepgram = deepgramEnabled();
   const dgStatus = useDeepgramSpeech(micEnabled && wantDeepgram, onSpeech);
   const deepgramDown = dgStatus === "unconfigured" || dgStatus === "error";
   const browserStatus = useBrowserSpeech(micEnabled && (!wantDeepgram || deepgramDown), onSpeech);
   const speech: SpeechStatus = wantDeepgram && !deepgramDown ? speechStatusFrom(dgStatus) : browserStatus;
+
+  return { localLines, localInterim, speech, addFinal, setSpeakerInterim };
+}
+
+export type LocalSpeech = ReturnType<typeof useLocalSpeech>;
+
+export function useTranscript(room: Room | undefined, local: LocalSpeech): Transcript {
+  const [remoteLines, setRemoteLines] = useState<Line[]>([]);
+  const [remoteInterim, setRemoteInterim] = useState<Record<string, string>>({});
+  const idRef = useRef(0);
+
+  const addRemoteFinal = useCallback((speaker: string, text: string, flag = false) => {
+    const fixed = fixTerms(text.trim());
+    if (!fixed) return;
+    const at = Date.now();
+    setRemoteLines((prev) => [...prev.slice(-MAX_LINES), { id: `${at}-${idRef.current++}`, at, speaker, text: fixed, flag }]);
+    setRemoteInterim((prev) => ({ ...prev, [speaker]: "" }));
+  }, []);
 
   useEffect(() => {
     if (!room) return;
@@ -87,8 +99,8 @@ export function useTranscript(room: Room | undefined, repName: string, micEnable
         const msg = JSON.parse(new TextDecoder().decode(payload));
         if (msg.type === "transcript") {
           const speaker = msg.name || msg.role || "Customer";
-          if (msg.final) addFinal(speaker, msg.final, looksLikeQuestion(msg.final));
-          else if (msg.interim != null) setSpeakerInterim(speaker, msg.interim);
+          if (msg.final) addRemoteFinal(speaker, msg.final, looksLikeQuestion(msg.final));
+          else if (msg.interim != null) setRemoteInterim((prev) => ({ ...prev, [speaker]: fixTerms(msg.interim) }));
         }
       } catch {
         /* ignore */
@@ -98,13 +110,32 @@ export function useTranscript(room: Room | undefined, repName: string, micEnable
     return () => {
       room.off(RoomEvent.DataReceived, handler);
     };
-  }, [room, addFinal, setSpeakerInterim]);
+  }, [room, addRemoteFinal]);
+
+  const lines = useMemo(() => {
+    const merged = [...local.localLines, ...remoteLines];
+    merged.sort((a, b) => a.at - b.at);
+    return merged.slice(-MAX_LINES);
+  }, [local.localLines, remoteLines]);
+
+  const interim = useMemo(
+    () => ({ ...local.localInterim, ...remoteInterim }),
+    [local.localInterim, remoteInterim],
+  );
+
+  const linesRef = useRef<Line[]>([]);
+  useEffect(() => {
+    linesRef.current = lines;
+  }, [lines]);
 
   const latest = useCallback(() => linesRef.current, []);
 
   const editLine = useCallback((id: string, text: string) => {
-    setLines((prev) => applyLineEdit(prev, id, text));
+    setRemoteLines((prev) => {
+      const next = applyLineEdit(prev, id, text);
+      return next !== prev ? next : prev;
+    });
   }, []);
 
-  return { lines, interim, speech, latest, editLine };
+  return { lines, interim, speech: local.speech, latest, editLine };
 }

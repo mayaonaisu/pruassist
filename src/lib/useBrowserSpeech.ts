@@ -64,20 +64,20 @@ export function useBrowserSpeech(
       setStatus(e.error === "not-allowed" || e.error === "service-not-allowed" ? "denied" : "error");
     };
 
-    // The API auto-stops on silence and after ~a minute of speech; restart promptly so words after
-    // a pause are not clipped. Back off only on repeated no-progress restarts (attempt resets to 0
-    // on every onstart/onresult), and cap low so it never sits deaf for seconds mid-conversation.
+    // The API auto-stops on silence and after ~a minute of speech; restart immediately so words
+    // after a pause are not clipped. Zero delay on a healthy restart (attempt resets on every
+    // onstart/onresult); back off only on repeated no-progress restarts.
     rec.onend = () => {
       if (stopped) return;
-      const delay = attempt === 0 ? 100 : Math.min(200 * 2 ** attempt, 2000);
+      const delay = attempt === 0 ? 0 : Math.min(100 * 2 ** attempt, 2000);
       attempt++;
-      timer = setTimeout(() => {
-        try {
-          rec.start();
-        } catch {
-          /* already started */
-        }
-      }, delay);
+      if (delay === 0) {
+        try { rec.start(); } catch { /* already started */ }
+      } else {
+        timer = setTimeout(() => {
+          try { rec.start(); } catch { /* already started */ }
+        }, delay);
+      }
     };
 
     try {

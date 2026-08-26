@@ -51,11 +51,9 @@ export async function classify(input: OrchestratorInput): Promise<ModeDecision |
         model,
         temperature: 0,
         max_tokens: 60,
-        // Nemotron (and other reasoning models) otherwise burn the whole budget on chain-of-thought
-        // and never emit the JSON. Routing is a one-shot classification; turn reasoning off so the
-        // answer lands fast and clean. Harmless for non-reasoning models (OpenRouter ignores it).
         reasoning: { enabled: false },
         response_format: { type: "json_object" },
+        provider: { sort: "latency" },
         messages: [
           { role: "system", content: SYSTEM },
           { role: "user", content: userMessage(input) },

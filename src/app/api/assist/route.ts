@@ -38,12 +38,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing 'transcript'." }, { status: 400 });
   }
 
+  const t0 = Date.now();
+
   // roomId is optional on purpose: a tab left open from an earlier session must not start failing
   // mid-demo. Without it there is no product area, no prepared answer, and no drift state.
   const rid = typeof roomId === "string" && roomId ? roomId : null;
-  const session = rid ? await getByRoom(rid) : null;
+
+  // Parallel Redis reads: session, state, and drift are keyed on roomId alone — no data dependency
+  // between them. Firing concurrently cuts 3 sequential round-trips to 1.
+  const [session, rawState, rawDrift] = rid
+    ? await Promise.all([getByRoom(rid), loadState(rid, "Health Protection"), loadDrift(rid)])
+    : [null, null, { count: 0, pausedAt: null } as DriftState];
   const productArea = session?.context.productArea;
-  const state = session && rid ? await loadState(rid, session.context.productArea) : null;
+  const state = session && rid ? (productArea && productArea !== "Health Protection" ? await loadState(rid, productArea) : rawState) : null;
+
+  const tRedis = Date.now() - t0;
 
   const scope = productArea ?? "Health Protection";
   const orchState = state ?? emptyState(rid ?? "anon", scope);
@@ -60,9 +69,8 @@ export async function POST(req: NextRequest) {
   // cache is skipped too. Only a real session gets a drift streak; a stale/anon tab bypasses it.
   const driftRoom = session ? rid : null;
   let presetMode: Mode | undefined;
-  let drift: DriftState = { count: 0, pausedAt: null };
+  let drift: DriftState = rawDrift;
   if (driftRoom) {
-    drift = await loadDrift(driftRoom);
     if (drift.pausedAt) {
       const verdict = await judgePausedTurn(orchInput);
       if ("resume" in verdict) {
@@ -82,12 +90,11 @@ export async function POST(req: NextRequest) {
       const l = state.lookahead;
       // A served answer is an in-scope turn — end any drift streak.
       if (driftRoom && drift.count > 0) await clearDrift(driftRoom);
+      console.log(`[assist] redis=${tRedis}ms cache-hit total=${Date.now() - t0}ms`);
       return NextResponse.json({
         mode: "policy_guidance",
         ...l.pointers,
         sources: l.sources,
-        // Surfaced rather than hidden: an answer written before the question was asked is a claim
-        // the rep should be able to see and check, not a silent optimisation.
         cached: true,
         prepared: { conceptId: l.conceptId, label: l.label, question: l.question, at: l.preparedAt, match: Number(check.score.toFixed(3)) },
         verified: l.verified,
@@ -98,7 +105,10 @@ export async function POST(req: NextRequest) {
 
   // 2) ORCHESTRATE — the brain (or the deterministic fallback) decides the mode; LangGraph routes
   // to the matching handler. The safety spine (readiness) is not here — it rides the state poll.
+  const tOrch0 = Date.now();
   const result = await runOrchestrator({ ...orchInput, presetMode });
+  const tOrch = Date.now() - tOrch0;
+  console.log(`[assist] redis=${tRedis}ms orch=${tOrch}ms total=${Date.now() - t0}ms mode=${result.mode}`);
 
   // 3) DRIFT bookkeeping — a substantive answer ends the streak; a repeat drift advances it and
   // pauses on the second consecutive one. keep_listening leaves the streak untouched.

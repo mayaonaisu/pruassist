@@ -17,8 +17,6 @@ export const dynamic = "force-dynamic";
 // browser's Web Speech recognizer. Swapping in an Owner-scoped key is all it takes to turn Deepgram
 // on — no code change.
 
-const GRANT_TTL_SECONDS = 300;
-
 export async function GET(req: NextRequest) {
   const joinToken = req.nextUrl.searchParams.get("token");
   if (joinToken) {
@@ -33,24 +31,9 @@ export async function GET(req: NextRequest) {
   const key = process.env.DEEPGRAM_API_KEY?.trim();
   if (!key) return NextResponse.json({ disabled: true, reason: "no-key" });
 
-  try {
-    const res = await fetch("https://api.deepgram.com/v1/auth/grant", {
-      method: "POST",
-      headers: { Authorization: `Token ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ ttl_seconds: GRANT_TTL_SECONDS }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) {
-      // A usage-only key cannot grant (403). Log once, degrade to Web Speech.
-      console.warn(`[deepgram] grant failed (${res.status}) — falling back to Web Speech. The key needs Owner scope.`);
-      return NextResponse.json({ disabled: true, reason: `grant-${res.status}` });
-    }
-    const data = await res.json();
-    const token = data?.access_token;
-    if (typeof token !== "string") return NextResponse.json({ disabled: true, reason: "no-token" });
-    return NextResponse.json({ token, expiresIn: typeof data.expires_in === "number" ? data.expires_in : GRANT_TTL_SECONDS });
-  } catch (e) {
-    console.warn(`[deepgram] grant error — falling back to Web Speech: ${e instanceof Error ? e.message : String(e)}`);
-    return NextResponse.json({ disabled: true, reason: "error" });
-  }
+  // Pass the API key directly. Grant JWTs (485 chars) exceed browser Sec-WebSocket-Protocol
+  // limits, silently breaking the handshake in Chrome — the WS closes before opening. The raw
+  // key (40 chars) fits and authenticates via ["token", key] subprotocol. The key is served only
+  // to authenticated reps or valid join-link holders, never to unauthenticated callers.
+  return NextResponse.json({ token: key, expiresIn: 3600 });
 }

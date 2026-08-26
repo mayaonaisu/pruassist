@@ -9,15 +9,15 @@ import { windowToSend, type Line } from "./transcript";
 // up and brings the ledger back down — the deep pass runs after the response is flushed, so what
 // the rep sees is always one cycle behind the scoring and never waits on it.
 
-const POLL_MS = 5000;
+const POLL_MS = 3000;
 
 // How long to wait for the final pass before reading the record back. The pass starts once the
 // POST has responded, so there is nothing to poll — only a short wait.
-const FLUSH_MS = 1600;
+const FLUSH_MS = 800;
 
 // A beat after a new customer line before nudging it up, to coalesce a sentence that finalises in
 // two fragments into one pass. Short enough that the false-assent catch still feels immediate.
-const NUDGE_MS = 900;
+const NUDGE_MS = 350;
 
 export type Prepared = { label: string; question: string; at: number; toolCalls: string[] };
 
@@ -68,6 +68,10 @@ export function useComprehension({
   const lastLineRef = useRef("");
   const nudgeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const followRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Client-side dismiss suppression: the deep pass takes a cycle to fold the dismiss act, so
+  // the next poll would resurrect the alert. Track dismissed concept IDs locally and strip them
+  // from the server response until the server catches up.
+  const dismissedRef = useRef<Set<string>>(new Set());
 
   const sync = useCallback(
     async (act?: { type: "teach-back-asked" | "dismiss"; conceptId: string }, final = false) => {
@@ -82,6 +86,10 @@ export function useComprehension({
         const data = (await res.json()) as AgentView;
         if (fresh) sentUpToRef.current = newest;
         recordRef.current = data.record ?? [];
+        // Suppress alerts the rep already dismissed locally but the server hasn't folded yet.
+        if (data.alert && dismissedRef.current.has(data.alert.conceptId)) {
+          data.alert = null;
+        }
         setAgent(data);
       } catch {
         /* a dropped poll is recovered by the next one */
@@ -138,6 +146,7 @@ export function useComprehension({
     (type: "teach-back-asked" | "dismiss", conceptId?: string) => {
       const target = conceptId ?? agent.alert?.conceptId;
       if (!target) return;
+      if (type === "dismiss") dismissedRef.current.add(target);
       if (target === agent.alert?.conceptId) setAgent((a) => ({ ...a, alert: null }));
       sync({ type, conceptId: target });
     },

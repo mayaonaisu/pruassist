@@ -1098,6 +1098,26 @@ test("kb: customClauses returns a source's clauses only for its own area", async
   }
 });
 
+// ---- generation subgraph: evaluator-optimizer retry ----
+
+const { shouldRetry } = await import("../src/lib/agent/orchestrator/generation.ts");
+
+test("generation: retries when figures are unsupported and attempts remain", () => {
+  assert.strictEqual(shouldRetry(["3500"], 1), true);
+});
+
+test("generation: does not retry when no unsupported figures", () => {
+  assert.strictEqual(shouldRetry([], 1), false);
+});
+
+test("generation: does not retry when attempt cap reached", () => {
+  assert.strictEqual(shouldRetry(["3500"], 2), false);
+});
+
+test("generation: does not retry on attempt 3 even with unsupported figures", () => {
+  assert.strictEqual(shouldRetry(["3500", "200000"], 3), false);
+});
+
 test("kb: removeSource drops it from the shared list", async () => {
   const s = await addTextSource({ label: "n", area: "KB-Test-C", text: "Content long enough to chunk into a clause for the removal test to work." });
   await removeSource(s.id);

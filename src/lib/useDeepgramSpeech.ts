@@ -20,7 +20,8 @@ export const deepgramEnabled = (): boolean =>
 
 const KEYTERMS = CANONICAL_TERMS.map((t) => `keyterm=${encodeURIComponent(t)}`).join("&");
 const WS_BASE =
-  "wss://api.deepgram.com/v1/listen?model=nova-3&language=en&smart_format=true&interim_results=true&" + KEYTERMS;
+  "wss://api.deepgram.com/v1/listen?model=nova-3&language=en&smart_format=true&interim_results=true" +
+  "&endpointing=400&utterance_end_ms=1200&" + KEYTERMS;
 
 const MAX_RECONNECTS = 5;
 
@@ -111,11 +112,10 @@ export function useDeepgramSpeech(
       }
       if (stopped) return;
 
-      // 3) Connect. The ephemeral token authenticates through the WebSocket subprotocol
-      // (`Sec-WebSocket-Protocol: bearer, <token>`). Deepgram's streaming endpoint rejects the token
-      // as an `?access_token=` query param — the handshake fails and the socket closes 1006 without
-      // ever opening — so query-string auth silently kills the primary STT path.
-      const socket = new WebSocket(WS_BASE, ["bearer", token]);
+      // 3) Connect. The token route returns the API key (40 chars), which authenticates via the
+      // `Sec-WebSocket-Protocol: token, <key>` subprotocol. Grant JWTs (485 chars) silently break
+      // the browser's subprotocol header limit and the WS closes before opening; the short key fits.
+      const socket = new WebSocket(WS_BASE, ["token", token]);
       ws = socket;
 
       socket.onopen = () => {
@@ -132,11 +132,10 @@ export function useDeepgramSpeech(
         rec.ondataavailable = (e) => {
           if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) socket.send(e.data);
         };
-        rec.start(250); // small timeslice keeps latency low
-        // Deepgram closes an idle socket after ~10s; a KeepAlive guards a quiet stretch.
+        rec.start(50);
         keepAlive = setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "KeepAlive" }));
-        }, 8000);
+        }, 5000);
       };
 
       socket.onmessage = (ev) => {

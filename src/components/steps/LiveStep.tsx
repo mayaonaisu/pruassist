@@ -8,7 +8,7 @@ import { useComprehension } from "@/lib/useComprehension";
 import { useConsent } from "@/lib/useConsent";
 import { useLocalMedia } from "@/lib/useLocalMedia";
 import { usePointers, type Clarify } from "@/lib/usePointers";
-import { useTranscript } from "@/lib/useTranscript";
+import { useLocalSpeech, useTranscript, type LocalSpeech } from "@/lib/useTranscript";
 import { resolveHotkey } from "@/lib/hotkeys";
 import { groupCitations, transcriptText, type Line } from "@/lib/transcript";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
@@ -44,6 +44,13 @@ export default function LiveStep({
     };
   }, [session.roomId, repName]);
 
+  // Local-mic STT lives here — above LiveKitRoom — so a room reconnect does not kill the
+  // Deepgram WS mid-handshake. The hook uses getUserMedia directly, not the room's tracks.
+  // micOn tracks whether the rep's mic is live (muting pauses STT so a muted rep's words
+  // don't feed the AI). Defaults true; LiveConsole syncs it from the room's track state.
+  const [micOn, setMicOn] = useState(true);
+  const localSpeech = useLocalSpeech(repName, !!token && micOn);
+
   if (!serverUrl) return <div className="notice bad">NEXT_PUBLIC_LIVEKIT_URL is not set in .env.local.</div>;
   if (error) return <div className="notice bad">{error}</div>;
   if (!token) return <div className="notice">Connecting to the secure room…</div>;
@@ -51,7 +58,7 @@ export default function LiveStep({
   return (
     <LiveKitRoom token={token} serverUrl={serverUrl} connect audio video>
       <RoomAudioRenderer />
-      <LiveConsole repName={repName} session={session} onEnd={onEnd} />
+      <LiveConsole repName={repName} session={session} onEnd={onEnd} localSpeech={localSpeech} onMicChange={setMicOn} />
     </LiveKitRoom>
   );
 }
@@ -75,15 +82,23 @@ function LiveConsole({
   repName,
   session,
   onEnd,
+  localSpeech,
+  onMicChange,
 }: {
   repName: string;
   session: SessionInfo;
   onEnd: (transcript: string, stats: Stats, durationMin: number, comprehension: Comprehension) => void;
+  localSpeech: LocalSpeech;
+  onMicChange: (on: boolean) => void;
 }) {
   const room = useRoomContext();
   const media = useLocalMedia(room);
 
-  const { lines, interim, speech, latest, editLine } = useTranscript(room, repName, media.mic === "on");
+  useEffect(() => {
+    onMicChange(media.mic === "on");
+  }, [media.mic, onMicChange]);
+
+  const { lines, interim, speech, latest, editLine } = useTranscript(room, localSpeech);
   const consent = useConsent(session.roomId);
 
   const [auto, setAuto] = useState(true);
