@@ -1,6 +1,5 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import type { Hit } from "../../retrieval";
-import { unsupportedFigures } from "../verify";
 import type { OrchestratorInput, Pointers } from "./types";
 
 const MAX_ATTEMPTS = 2;
