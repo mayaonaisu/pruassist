@@ -1,0 +1,17 @@
+{
+  "name": "The tier decision, two thirds settled",
+  "productArea": "Health Protection",
+  "expect": "pro-ration:asserted",
+  "note": "Reaches the tier comparison with pro-ration agreed but never demonstrated — the one that changes the bill.",
+  "turns": [
+    { "t": "00:20", "role": "rep", "text": "The deductible is the amount you pay yourself first, once per policy year, before MediShield Life or PRUShield pays anything." },
+    { "t": "00:34", "role": "customer", "text": "So I pay the first chunk myself each year, and only after that does the insurance start paying anything." },
+    { "t": "00:52", "role": "rep", "text": "Right. Now the deductible amount depends on the ward — S$1,500 in a C ward, S$2,500 in B1, and S$3,500 in an A ward." },
+    { "t": "01:10", "role": "customer", "text": "So it depends where I am treated — B1 is about S$2,500 and an A ward is S$3,500." },
+    { "t": "01:28", "role": "rep", "text": "Exactly. The yearly limit differs too — Premier is S$2,000,000 a year, Plus is S$1,000,000, and Standard is S$200,000." },
+    { "t": "01:44", "role": "customer", "text": "So Premier gives me the highest ceiling in a year and Standard the lowest of the three." },
+    { "t": "02:02", "role": "rep", "text": "And if you go to a hospital above what your plan entitles you to, the claim is pro-rated first — on Plus a private hospital is cut to 65%." },
+    { "t": "02:12", "role": "customer", "text": "Okay, yeah, that makes sense." },
+    { "t": "02:26", "role": "customer", "text": "So which plan would be better for me, Premier or Plus?" }
+  ]
+}

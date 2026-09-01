@@ -37,7 +37,8 @@ export default function LoginPage() {
       <div className="pru-enter" style={{ width: "min(400px, 100%)" }}>
         <div style={{ textAlign: "center", marginBottom: 22 }}>
           <span className="pru-logo" style={{ fontSize: 20 }}>
-            PRU<i>Assist</i>
+            <img className="pru-mark" src="/prudential-logo.png" alt="Prudential" />
+            <i>Assist</i>
           </span>
         </div>
 

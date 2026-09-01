@@ -39,8 +39,14 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const at = new AccessToken(apiKey, apiSecret, { identity: username, ttl: "2h" });
-  at.addGrant({ room: roomId, roomJoin: true, canPublish: true, canSubscribe: true });
+  // Identity must be UNIQUE per participant in a room — two participants with the same identity
+  // evict each other, so a rep and customer who happen to share a name would never see each other.
+  // Role-prefixing guarantees the rep and the (single) customer never collide, while `name` keeps
+  // a clean label for the tiles. canPublishData is granted because the customer's live transcript
+  // rides the data channel — without it their words never reach the rep.
+  const role = joinToken ? "customer" : "rep";
+  const at = new AccessToken(apiKey, apiSecret, { identity: `${role}:${username}`, name: username, ttl: "2h" });
+  at.addGrant({ room: roomId, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true });
   const token = await at.toJwt();
   return NextResponse.json({ token, room: roomId });
 }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { SessionInfo } from "@/lib/console-types";
 import DocumentsInScope from "../DocumentsInScope";
-import { productAreas } from "@/lib/knowledge";
+import { conceptAreas } from "@/lib/concepts";
 
 const FOCUS = [
   "policy differences",
@@ -12,7 +12,9 @@ const FOCUS = [
   "objections",
   "claim scenarios",
 ];
-const AREAS = productAreas();
+// Only areas the comprehension engine covers (has authored concepts). Picking an area with no
+// concepts would silently produce no readiness, no alert and an empty Understanding Record.
+const AREAS = conceptAreas();
 
 // Reads the selection back as speech, since the sentence above is what the rep will say.
 function asPhrase(items: string[]): string {
@@ -127,7 +129,9 @@ export default function ConsentStep({
             <span className={`chip ${ready ? "ok" : "wait"}`}>{ready ? "SIGNED" : "UNSIGNED"}</span>
           </div>
           <p>
-            I confirm the customer has been told this session is recorded and transcribed to assist my advice.
+            I confirm the customer has been told this session is recorded and transcribed to assist my advice, and
+            that short quotes of what they say about specific policy terms are kept for 24 hours to produce the
+            understanding record.
           </p>
           <label style={{ display: "flex", gap: 8, fontSize: 13, cursor: "pointer", marginBottom: 16, color: "var(--ink-2)" }}>
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />

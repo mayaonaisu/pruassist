@@ -2,11 +2,11 @@
    Geist Mono = citations, Fraunces = document titles, Inter = interface. */
 
 :root {
-  /* ---- surfaces: brochure paper ---- */
-  --brochure: #faf6ef;
-  --brochure-2: #f2ece1;
-  --brochure-3: #eae2d4;
-  --card: #fffdf9;
+  /* ---- surfaces: Prudential's clean light-grey / white (prudential.com.sg) ---- */
+  --brochure: #f4f5f7;
+  --brochure-2: #eceef1;
+  --brochure-3: #e2e5e9;
+  --card: #ffffff;
 
   /* ---- ink: four levels, all ≥4.5:1 on every surface ---- */
   --ink: #171a21;
@@ -19,10 +19,11 @@
   --rule-soft: rgba(23, 26, 33, 0.06);
   --rule-strong: rgba(23, 26, 33, 0.2);
 
-  /* ---- brand ---- */
-  --pru: #c8102e;
-  --pru-tint: rgba(200, 16, 46, 0.06);
-  --pru-line: rgba(200, 16, 46, 0.28);
+  /* ---- brand: Prudential red, with slate as the secondary accent (prudential.com.sg) ---- */
+  --pru: #ed1b2e;
+  --pru-tint: rgba(237, 27, 46, 0.06);
+  --pru-line: rgba(237, 27, 46, 0.28);
+  --slate: #546885;
 
   /* ---- the highlighter: confusion only ---- */
   --marker: #e8b317;
@@ -124,11 +125,20 @@ button {
   border-bottom: 1px solid var(--rule);
 }
 .pru-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-family: var(--font-serif);
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.012em;
   white-space: nowrap;
+}
+/* The Prudential wordmark; "Assist" sits beside it as the product name. */
+.pru-mark {
+  height: 1.35em;
+  width: auto;
+  display: block;
 }
 .pru-logo i {
   color: var(--pru);
@@ -277,7 +287,7 @@ button {
   border: 0;
   padding: 0;
   font: 400 12.5px var(--font-sans);
-  color: var(--ink-3);
+  color: var(--slate);
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -431,13 +441,49 @@ button {
 }
 
 /* the two faces in one short row; the freed width carries the timeline */
-.c-top {
+/* The console is two columns: the live call on the left, the prompter on the right. This replaced a
+   stack of boxes that left a gap beside the shrunken video row and put a floating button over the
+   transcript. */
+.console {
   display: flex;
-  gap: 11px;
-  flex: none;
-  flex-wrap: wrap;
+  gap: 13px;
+  flex: 1;
+  min-height: 0;
 }
-/* The row lives here, not on .c-top, which sees only two children. Flex absorbs a third face. */
+.call-rail {
+  flex: none;
+  width: clamp(300px, 26vw, 380px);
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  min-height: 0;
+}
+.prompter {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+/* In the rail the two faces stack and fill the width, both 16:9. */
+.call-rail .cams {
+  flex-direction: column;
+  width: 100%;
+}
+.call-rail .cam {
+  width: 100%;
+}
+/* The transcript fills the rest of the rail; the context dock sits under it. */
+.call-rail .pane.tr {
+  flex: 1;
+  min-height: 0;
+}
+/* The line is the hero of the prompter, so the backup deck is capped and the line takes the rest. */
+.prompter .pane.sup {
+  flex: none;
+  max-height: clamp(130px, 20vh, 220px);
+}
 .cams {
   display: flex;
   gap: 11px;
@@ -455,8 +501,20 @@ button {
 .cam.me {
   background: var(--lens-2);
 }
+/* LiveKit's tile wrapper has no intrinsic height here (it is not inside a GridLayout), so a
+   height:100% video resolved against it collapsed to the video's own portrait height and the .cam
+   box clipped the top half. Pin the whole chain to fill the .cam box and cover-crop. */
+.cam .lk-participant-tile {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
 .cam video,
 .cam .lk-participant-media-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -501,6 +559,21 @@ button {
   padding: 2px 6px;
   border-radius: var(--r-xs);
 }
+.cam-mute {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+  background: var(--pru);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+}
 .cam-ctl {
   position: absolute;
   right: 7px;
@@ -540,56 +613,33 @@ button {
   border-radius: var(--r-xs);
 }
 
-/* the confusion timeline */
-.c-meta {
-  flex: 1;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  background: var(--brochure-2);
-  padding: 10px 13px;
-  display: flex;
-  flex-direction: column;
-  min-width: 180px;
-}
-.strip-h {
+/* readiness — the comparison in play, and what is still open */
+/* Degraded mode: keyword-only detection because embeddings were unavailable. A muted amber note in
+   the status bar — the assistant still works, just less precisely. */
+.degraded-tag {
+  display: inline-flex;
+  align-items: center;
   font-family: var(--font-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.13em;
+  font-size: 8px;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--pencil);
-  margin-bottom: 8px;
-}
-.bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  flex: 1;
-  min-height: 26px;
-}
-.bars span {
-  flex: 1;
-  background: var(--brochure-3);
-  border-radius: 1px;
-  transition: height 0.3s ease;
-}
-.bars span.mid {
-  background: rgba(232, 179, 23, 0.45);
-}
-.bars span.hi {
-  background: var(--marker);
-}
-.strip-legend {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 6px;
-  font-family: var(--font-mono);
-  font-size: 8.5px;
-  color: var(--pencil);
-}
-.strip-legend b {
-  font-weight: 400;
   color: var(--marker-ink);
+  background: var(--marker-wash);
+  border-radius: var(--r-xs);
+  padding: 3px 7px;
+  cursor: help;
+}
+
+/* orchestrator modes — the topic-drift warning and the clarification prompt in the line-block */
+.line-block .drift .cat {
+  color: var(--marker-ink);
+}
+/* Paused reads a notch more serious than a first-time drift warning: the assistant has stopped. */
+.line-block .paused .cat {
+  color: var(--pru);
+}
+.line-block .paused .concern {
+  color: var(--pencil);
 }
 
 /* THE LINE — the one thing the rep reads mid-conversation */
@@ -602,7 +652,18 @@ button {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  /* A long suggested line must scroll INSIDE the card, not spill out. `justify-content: center`
+     centred tall content and let it bleed onto the video row above and the support/transcript row
+     below; the auto-margins below re-create that centring only when the content actually fits. */
+  overflow-y: auto;
+}
+/* Centre the content when it is shorter than the card; collapse to a top-aligned scroll when it is
+   taller (auto margins go to 0, and the top stays reachable — unlike justify-content). */
+.line-block > :first-child {
+  margin-top: auto;
+}
+.line-block > :last-child {
+  margin-bottom: auto;
 }
 .lb-head {
   display: flex;
@@ -631,6 +692,53 @@ button {
   color: var(--ink-3);
   line-height: 1.45;
   margin-bottom: 10px;
+}
+/* Speculative work that has already been checked — the consent stamp, not the highlighter. */
+.lb-head .ready,
+.comp-h .ready {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--stamp);
+  background: var(--stamp-wash);
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+}
+.ahead {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule-soft);
+}
+.ahead .k {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pencil);
+  flex: none;
+}
+.ahead .v {
+  font-family: var(--font-spoken);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink-3);
+  min-width: 0;
+}
+.ahead .on {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--pencil);
+}
+/* The grounding self-check speaks in the margin, beside the citation it qualifies. */
+.cite-warn {
+  display: block;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--rule-soft);
+  color: var(--pru);
 }
 .concern b {
   color: var(--ink-2);
@@ -716,14 +824,75 @@ button {
   cursor: not-allowed;
 }
 
-/* supporting material + transcript, side by side under the line */
-.c-bot {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(260px, 22vw, 380px);
-  gap: 13px;
+/* COMPREHENSION — evidence about the customer, sitting above the line because it changes what
+   the rep should say next. The highlighter is the house signal for confusion, so it carries the
+   softer states; only a direct contradiction of a clause escalates to the brand rule. */
+.comp {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--marker);
+  border-radius: var(--r-md);
+  padding: clamp(11px, 1.3vh, 17px) clamp(15px, 1.5vw, 23px);
   flex: none;
-  height: clamp(190px, 27vh, 320px);
 }
+.comp-misunderstood,
+.comp-divergence {
+  border-left-color: var(--pru);
+  background: var(--pru-tint);
+}
+.comp-h {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 6px;
+}
+.comp-h .cat {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--marker-ink);
+  background: var(--marker-wash);
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+}
+.comp-misunderstood .cat,
+.comp-divergence .cat {
+  color: var(--pru);
+  background: var(--pru-tint);
+  box-shadow: inset 0 0 0 1px var(--pru-line);
+}
+.comp-h .conf {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--pencil);
+}
+.comp-head {
+  font-size: clamp(15px, 1.15vw, 18px);
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+.comp-detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin-bottom: 9px;
+}
+/* The customer's own words are the evidence, so they are set in the spoken face. */
+.comp-quote {
+  font-family: var(--font-spoken);
+  font-size: 13.5px;
+  color: var(--ink-2);
+  margin-right: 7px;
+}
+.comp .say {
+  font-size: clamp(17px, 1.3vw, 23px);
+}
+
+/* supporting material + transcript, side by side under the line */
 .pane {
   border: 1px solid var(--rule);
   border-radius: var(--r-md);
@@ -802,9 +971,19 @@ button {
 .tr-body {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  overflow: hidden;
+  flex: 1;
+  overflow-y: auto;
   min-height: 0;
+}
+/* Pin short content to the bottom (the live-feed look) without letting a full feed overflow past
+   the top edge under the header — `justify-content: flex-end` clips the top line and hides history;
+   `margin-top: auto` bottom-aligns when short and scrolls when tall. */
+.tr-body > :first-child {
+  margin-top: auto;
+}
+/* Long unbroken tokens (URLs, mis-heard run-ons) must wrap, not widen the pane. */
+.tr-line {
+  overflow-wrap: anywhere;
 }
 .tr-line {
   font-size: 12px;
@@ -831,6 +1010,30 @@ button {
 }
 .tr-line.now .who {
   color: var(--pru);
+}
+/* A final line is correctable: hint on hover, and swap to a small editor in place while editing. */
+.tr-line[title]:hover {
+  background: var(--brochure-2);
+  border-radius: var(--r-xs);
+  cursor: text;
+}
+.tr-edit {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-xs);
+  padding: 4px 6px;
+  resize: vertical;
+}
+/* Deduped citation pages, set quiet next to the document name. */
+.cite-pp {
+  color: var(--pencil);
 }
 
 /* ============ landing ============ */
@@ -1138,6 +1341,112 @@ button {
   color: var(--ink-3);
 }
 
+/* ---- the Understanding Record: the artifact the rep signs and files ---- */
+.ur {
+  border-top: 1px solid var(--rule);
+}
+.ur-row {
+  display: grid;
+  grid-template-columns: 150px 108px 42px minmax(0, 1fr) 118px;
+  grid-template-areas: "label state at quote cite" ". risk risk risk risk";
+  gap: 2px 12px;
+  align-items: baseline;
+  padding: 9px 0 9px 10px;
+  border-bottom: 1px solid var(--rule-soft);
+  border-left: 2px solid transparent;
+}
+.ur-demonstrated {
+  border-left-color: var(--stamp);
+}
+.ur-asserted {
+  border-left-color: var(--marker);
+}
+.ur-misunderstood {
+  border-left-color: var(--pru);
+}
+.ur-label {
+  grid-area: label;
+  font-size: 13px;
+  color: var(--ink);
+}
+.ur-state {
+  grid-area: state;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--pencil);
+}
+.ur-demonstrated .ur-state {
+  color: var(--stamp);
+}
+.ur-asserted .ur-state {
+  color: var(--marker-ink);
+}
+.ur-misunderstood .ur-state {
+  color: var(--pru);
+}
+.ur-at {
+  grid-area: at;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--pencil);
+}
+/* Their words, in the spoken face — the evidence, not a paraphrase of it. */
+.ur-quote {
+  grid-area: quote;
+  font-family: var(--font-spoken);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.ur-cite {
+  grid-area: cite;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--pencil);
+  text-align: right;
+}
+/* Always placed, or an empty cell would be auto-flowed into a row of its own. */
+.ur-risk {
+  grid-area: risk;
+}
+.ur-risk:not(:empty) {
+  font-size: 11.5px;
+  color: var(--marker-ink);
+  padding-top: 2px;
+}
+.ur-misunderstood .ur-risk {
+  color: var(--pru);
+}
+.ur-sign {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.ur-sign b {
+  font-weight: 400;
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .ur-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "label state" "quote quote" "cite at" "risk risk";
+  }
+  .ur-cite {
+    text-align: left;
+  }
+}
+
 /* ============ customer join ============ */
 .cust-wrap {
   max-width: 580px;
@@ -1240,8 +1549,8 @@ button {
 
 /* ============ responsive ============ */
 @media (max-width: 1080px) {
-  .c-bot {
-    grid-template-columns: minmax(0, 1fr) 250px;
+  .call-rail {
+    width: clamp(260px, 24vw, 320px);
   }
   .say-wrap {
     grid-template-columns: minmax(0, 1fr) 140px;
@@ -1260,24 +1569,28 @@ button {
   .pru-grid-3 {
     grid-template-columns: 1fr;
   }
-  /* Below this the console scrolls: two faces plus the line on a phone shrinks both past use. */
+  /* Below this the console scrolls and stacks: the two-column split is too cramped on a phone. */
   .pru-live {
     height: auto;
     min-height: 0;
   }
-  .cams {
-    flex: 1 1 100%;
+  .console {
+    flex-direction: column;
   }
-  .cam {
+  .call-rail {
+    width: auto;
+  }
+  /* Full width again, so the faces go back to a row. */
+  .call-rail .cams {
+    flex-direction: row;
+  }
+  .call-rail .cam {
     flex: 1;
     width: auto;
   }
-  .c-meta {
-    flex: 1 1 100%;
-    min-height: 88px;
-  }
-  .c-bot {
-    grid-template-columns: 1fr;
+  .call-rail .pane.tr {
+    flex: none;
+    max-height: 240px;
   }
   .pane {
     max-height: 260px;
@@ -1335,4 +1648,190 @@ button {
     margin-left: 0;
     flex-basis: 100%;
   }
+}
+
+/* ============ context chat (docked in the call rail) ============
+   The assistant asks the rep for context it can't hear, and the rep can volunteer it any time.
+   Docked at the foot of the call rail so it never floats over the transcript or the line. */
+.ctx-dock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ctx-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--rule-strong);
+  background: var(--card);
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ctx-bar:hover {
+  border-color: var(--pencil);
+}
+.ctx-bar.asking {
+  border-color: var(--pru);
+  color: var(--pru);
+}
+.ctx-bar-t {
+  margin-right: auto;
+}
+.ctx-caret {
+  font-size: 10px;
+  color: var(--pencil);
+}
+.ctx-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pru);
+}
+/* Opens above the bar and takes a fixed slice of the rail; the transcript above it shrinks. */
+.ctx-panel {
+  height: clamp(190px, 32vh, 300px);
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.ctx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--rule);
+  flex: none;
+}
+.ctx-title {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pencil);
+}
+.ctx-x {
+  border: 0;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--pencil);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.ctx-feed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ctx-empty {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--pencil);
+  margin: auto 0;
+}
+.ctx-msg {
+  max-width: 85%;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 11px;
+  border-radius: 12px;
+}
+.ctx-ai {
+  align-self: flex-start;
+  background: var(--brochure-2);
+  color: var(--ink-2);
+  border-bottom-left-radius: 3px;
+}
+.ctx-rep {
+  align-self: flex-end;
+  background: var(--ink);
+  color: var(--brochure);
+  border-bottom-right-radius: 3px;
+}
+.ctx-form {
+  display: flex;
+  gap: 8px;
+  padding: 11px;
+  border-top: 1px solid var(--rule);
+  flex: none;
+}
+.ctx-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-xs);
+  background: var(--brochure);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.ctx-input:focus {
+  outline: 2px solid var(--stamp);
+  outline-offset: 1px;
+}
+.ctx-send {
+  border: 0;
+  background: var(--ink);
+  color: var(--brochure);
+  border-radius: var(--r-xs);
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ctx-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ============ knowledge base manager ============ */
+.kb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--card);
+}
+.kb-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pencil);
+  margin-top: 3px;
+}
+.kb-url {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 11.5px;
+  color: var(--slate);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

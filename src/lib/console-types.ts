@@ -1,3 +1,5 @@
+import type { RecordRow } from "./agent/types";
+
 export type SessionInfo = {
   joinToken: string;
   roomId: string;
@@ -8,11 +10,22 @@ export type SessionInfo = {
 
 export type Stats = { surfaced: number; used: number; flags: number; docs: number };
 
+// What the live console knows about comprehension, handed to the brief when the session ends.
+export type Comprehension = Pick<SummaryData, "record" | "customerName">;
+
 export type SummaryData = {
   concerns: string[];
   talkingPoints: string[];
   followUps: string[];
   notes: string;
+  // False when the AI summary service failed to produce a brief — distinct from a brief that is
+  // genuinely empty because nothing was said. The Understanding Record does not depend on it.
+  briefGenerated: boolean;
   stats: Stats;
   durationMin: number;
+  // The Understanding Record: one row per material concept, with the customer's own words as
+  // evidence. Empty when the shared store was unavailable during the session.
+  record: RecordRow[];
+  customerName: string;
+  signedBy: string;
 };

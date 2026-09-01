@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentRep } from "@/lib/auth";
+import { conceptAreas } from "@/lib/concepts";
 import { createSession, getByToken } from "@/lib/sessions";
 
 export const runtime = "nodejs";
@@ -19,8 +20,12 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const repName = repDisplayName(body.repName);
+  // Only areas the comprehension engine covers are allowed — a stale client (cached before the
+  // picker was gated) could otherwise start a session in an area with no concepts, where nothing
+  // is ever tracked. Fall back to the first covered area (Health Protection today).
+  const areas = conceptAreas();
   const context = {
-    productArea: typeof body.productArea === "string" ? body.productArea : "Health Protection",
+    productArea: typeof body.productArea === "string" && areas.includes(body.productArea) ? body.productArea : (areas[0] ?? "Health Protection"),
     focus: Array.isArray(body.focus) ? body.focus.filter((f: unknown) => typeof f === "string") : [],
   };
 

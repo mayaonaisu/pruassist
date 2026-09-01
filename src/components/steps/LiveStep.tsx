@@ -1,37 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  LiveKitRoom,
-  ParticipantTile,
-  RoomAudioRenderer,
-  useRoomContext,
-  useTracks,
-} from "@livekit/components-react";
-import { RoomEvent, Track } from "livekit-client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { LiveKitRoom, RoomAudioRenderer, useRoomContext } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { useBrowserSpeech } from "@/lib/useBrowserSpeech";
-import { useLocalMedia, type DeviceStatus } from "@/lib/useLocalMedia";
-import type { SessionInfo, Stats } from "@/lib/console-types";
-
-type Line = { id: string; speaker: string; text: string; flag?: boolean };
-type Src = { source: string; snippet: string };
-type Pointers = {
-  concern: string;
-  firstStep: string;
-  suggestedLine: string;
-  explainer: string;
-  comparison: string;
-  followUp: string;
-  sources: Src[];
-};
-
-function looksLikeQuestion(text: string): boolean {
-  const s = text.trim().toLowerCase();
-  if (s.split(/\s+/).length < 3) return false;
-  if (s.includes("?")) return true;
-  return /\b(why|what|whats|how|when|which|who|where|do i|can i|could i|should i|is it|are there|difference|cover|covered|exclud|deductible|insurance|rider|add[- ]?on|claim|premium|expensive|cost|afford|worried|confus|not sure|understand|mean|need)\b/.test(s);
-}
+import { CAM_LABEL, Faces, isBroken } from "@/components/Faces";
+import { useComprehension } from "@/lib/useComprehension";
+import { useConsent } from "@/lib/useConsent";
+import { useLocalMedia } from "@/lib/useLocalMedia";
+import { usePointers, type Clarify } from "@/lib/usePointers";
+import { useLocalSpeech, useTranscript, type LocalSpeech } from "@/lib/useTranscript";
+import { resolveHotkey } from "@/lib/hotkeys";
+import { groupCitations, transcriptText, type Line } from "@/lib/transcript";
+import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
+import type { Alert } from "@/lib/agent/types";
 
 export default function LiveStep({
   repName,
@@ -40,7 +21,7 @@ export default function LiveStep({
 }: {
   repName: string;
   session: SessionInfo;
-  onEnd: (transcript: string, stats: Stats, durationMin: number) => void;
+  onEnd: (transcript: string, stats: Stats, durationMin: number, comprehension: Comprehension) => void;
 }) {
   const serverUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
   const [token, setToken] = useState<string>();
@@ -63,6 +44,13 @@ export default function LiveStep({
     };
   }, [session.roomId, repName]);
 
+  // Local-mic STT lives here — above LiveKitRoom — so a room reconnect does not kill the
+  // Deepgram WS mid-handshake. The hook uses getUserMedia directly, not the room's tracks.
+  // micOn tracks whether the rep's mic is live (muting pauses STT so a muted rep's words
+  // don't feed the AI). Defaults true; LiveConsole syncs it from the room's track state.
+  const [micOn, setMicOn] = useState(true);
+  const localSpeech = useLocalSpeech(repName, !!token && micOn);
+
   if (!serverUrl) return <div className="notice bad">NEXT_PUBLIC_LIVEKIT_URL is not set in .env.local.</div>;
   if (error) return <div className="notice bad">{error}</div>;
   if (!token) return <div className="notice">Connecting to the secure room…</div>;
@@ -70,91 +58,10 @@ export default function LiveStep({
   return (
     <LiveKitRoom token={token} serverUrl={serverUrl} connect audio video>
       <RoomAudioRenderer />
-      <LiveConsole repName={repName} session={session} onEnd={onEnd} />
+      <LiveConsole repName={repName} session={session} onEnd={onEnd} localSpeech={localSpeech} onMicChange={setMicOn} />
     </LiveKitRoom>
   );
 }
-
-/* The two faces in one row. Customer first; the rep's own tile carries the device controls. */
-function Faces({ media }: { media: ReturnType<typeof useLocalMedia> }) {
-  const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
-  const local = tracks.find((t) => t.participant.isLocal);
-  const remotes = tracks.filter((t) => !t.participant.isLocal);
-
-  return (
-    <div className="cams" data-lk-theme="default">
-      {remotes.length === 0 ? (
-        <div className="cam">
-          <div className="cam-face">waiting for the customer…</div>
-          <span className="cam-tag">CUSTOMER</span>
-        </div>
-      ) : (
-        remotes.map((t) => (
-          <div className="cam" key={t.participant.sid}>
-            <ParticipantTile trackRef={t} />
-            <span className="cam-tag">CUSTOMER</span>
-            <span className="cam-nm">
-              <span className="sp" />
-              {t.participant.name || t.participant.identity}
-            </span>
-          </div>
-        ))
-      )}
-
-      <div className="cam me">
-        {local ? <ParticipantTile trackRef={local} /> : <div className="cam-face">camera off</div>}
-        <span className="cam-tag">YOU</span>
-        {/* A failed camera must not read as one the rep chose to turn off. */}
-        {isBroken(media.cam) && <span className="cam-bad">{CAM_LABEL[media.cam].text.toUpperCase()}</span>}
-        <span className="cam-ctl">
-          <button
-            type="button"
-            className={deviceClass(media.mic)}
-            onClick={media.toggleMic}
-            title={MIC_LABEL[media.mic].hint}
-            aria-label={MIC_LABEL[media.mic].hint}
-          >
-            <IconMic off={media.mic !== "on"} />
-          </button>
-          <button
-            type="button"
-            className={deviceClass(media.cam)}
-            onClick={media.toggleCam}
-            title={CAM_LABEL[media.cam].hint}
-            aria-label={CAM_LABEL[media.cam].hint}
-          >
-            <IconCam off={media.cam !== "on"} />
-          </button>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function IconMic({ off }: { off?: boolean }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="9" y="2" width="6" height="11" rx="3" />
-      <path d="M5 10a7 7 0 0 0 14 0" />
-      <path d="M12 17v4" />
-      {off && <line x1="3" y1="3" x2="21" y2="21" />}
-    </svg>
-  );
-}
-function IconCam({ off }: { off?: boolean }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="2" y="6" width="13" height="12" rx="2" />
-      <path d="m15 10 6-3.5v11L15 14" />
-      {off && <line x1="2" y1="2" x2="22" y2="22" />}
-    </svg>
-  );
-}
-
-const isBroken = (s: DeviceStatus) => s === "missing" || s === "blocked";
-const deviceClass = (s: DeviceStatus) => (isBroken(s) ? "bad" : s === "off" ? "off" : "");
-
-const BUCKETS = 16;
 
 // Isolated so the ticking clock re-renders a <span>, not the whole console every second.
 function Elapsed({ startedAt }: { startedAt: number }) {
@@ -167,180 +74,88 @@ function Elapsed({ startedAt }: { startedAt: number }) {
   return <>{`${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`}</>;
 }
 
+/**
+ * The rep's live console. Four concerns, four hooks — the transcript, the consent poll, the AI
+ * pointers and the comprehension ledger — leaving this to compose them and lay them out.
+ */
 function LiveConsole({
   repName,
   session,
   onEnd,
+  localSpeech,
+  onMicChange,
 }: {
   repName: string;
   session: SessionInfo;
-  onEnd: (transcript: string, stats: Stats, durationMin: number) => void;
+  onEnd: (transcript: string, stats: Stats, durationMin: number, comprehension: Comprehension) => void;
+  localSpeech: LocalSpeech;
+  onMicChange: (on: boolean) => void;
 }) {
   const room = useRoomContext();
-  const [lines, setLines] = useState<Line[]>([]);
-  const [interim, setInterim] = useState<Record<string, string>>({});
-  const [consent, setConsent] = useState<{ name: string; consentedAt: string } | null>(null);
-  const [result, setResult] = useState<Pointers | null>(null);
-  const [note, setNote] = useState<string>();
-  const [used, setUsed] = useState<Set<string>>(new Set());
-  const [openKey, setOpenKey] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const media = useLocalMedia(room);
+
+  useEffect(() => {
+    onMicChange(media.mic === "on");
+  }, [media.mic, onMicChange]);
+
+  const { lines, interim, speech, latest, editLine } = useTranscript(room, localSpeech);
+  const consent = useConsent(session.roomId);
+
   const [auto, setAuto] = useState(true);
+  const pointers = usePointers({ roomId: session.roomId, repName, lines, latest, auto });
+  const comprehension = useComprehension({ roomId: session.roomId, repName, latest, lines });
+  const { agent } = comprehension;
+
   const [copied, setCopied] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
-
-  const idRef = useRef(0);
-  const feedRef = useRef<HTMLDivElement>(null);
-  const linesRef = useRef<Line[]>([]);
-  const inFlightRef = useRef(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTriggerRef = useRef("");
   const startRef = useRef(0);
-  const statsRef = useRef<Stats>({ surfaced: 0, used: 0, flags: 0, docs: 0 });
-  const docsRef = useRef<Set<string>>(new Set());
+  const feedRef = useRef<HTMLDivElement>(null);
+  // The key handler subscribes once; read the freshest pointers through a ref rather than
+  // re-binding the listener on every interim-transcript re-render.
+  const pointersRef = useRef(pointers);
+  useEffect(() => {
+    pointersRef.current = pointers;
+  });
 
   useEffect(() => {
     startRef.current = Date.now();
     setStartedAt(startRef.current);
   }, []);
 
-  const addFinal = useCallback((speaker: string, text: string, flag = false) => {
-    if (!text.trim()) return;
-    setLines((prev) => [...prev.slice(-200), { id: `${Date.now()}-${idRef.current++}`, speaker, text: text.trim(), flag }]);
-    setInterim((prev) => ({ ...prev, [speaker]: "" }));
-  }, []);
-  const setSpeakerInterim = useCallback((speaker: string, text: string) => {
-    setInterim((prev) => ({ ...prev, [speaker]: text }));
-  }, []);
-
-  const media = useLocalMedia(room);
-  const micEnabled = media.mic === "on";
-
-  // Muting must pause transcription too, or "Mute" keeps feeding the rep's words to the AI.
-  const speech = useBrowserSpeech(micEnabled, ({ final, interim: itm }) => {
-    if (final) addFinal(repName, final);
-    if (itm) setSpeakerInterim(repName, itm);
-  });
-
-  useEffect(() => {
-    if (!room) return;
-    const handler = (payload: Uint8Array) => {
-      try {
-        const msg = JSON.parse(new TextDecoder().decode(payload));
-        if (msg.type === "transcript") {
-          const speaker = msg.name || msg.role || "Customer";
-          if (msg.final) addFinal(speaker, msg.final, looksLikeQuestion(msg.final));
-          else if (msg.interim != null) setSpeakerInterim(speaker, msg.interim);
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-    room.on(RoomEvent.DataReceived, handler);
-    return () => {
-      room.off(RoomEvent.DataReceived, handler);
-    };
-  }, [room, addFinal, setSpeakerInterim]);
-
-  useEffect(() => {
-    let active = true;
-    const tick = async () => {
-      try {
-        const res = await fetch(`/api/consent?room=${encodeURIComponent(session.roomId)}`);
-        const data = await res.json();
-        if (active) setConsent(data.consent);
-      } catch {
-        /* ignore */
-      }
-    };
-    tick();
-    const t = setInterval(tick, 4000);
-    return () => {
-      active = false;
-      clearInterval(t);
-    };
-  }, [session.roomId]);
-
-  useEffect(() => {
-    linesRef.current = lines;
-  }, [lines]);
   useEffect(() => {
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight });
   }, [lines, interim]);
 
-  // `rephrase` replaces the current pointers, so it must not re-count them as new flags.
-  const runSuggest = useCallback(async ({ rephrase = false }: { rephrase?: boolean } = {}) => {
-    if (inFlightRef.current) return;
-    const transcript = linesRef.current.slice(-12).map((l) => `${l.speaker}: ${l.text}`).join("\n");
-    if (!transcript) {
-      setNote("No transcript yet — once the conversation starts, pointers appear here.");
-      return;
-    }
-    inFlightRef.current = true;
-    setLoading(true);
-    setNote(undefined);
-    try {
-      const res = await fetch("/api/assist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript }),
-      });
-      const data = await res.json();
-      if (data.note) {
-        setNote(data.note);
-      } else {
-        const r: Pointers = {
-          concern: data.concern || "",
-          firstStep: data.firstStep || "",
-          suggestedLine: data.suggestedLine || "",
-          explainer: data.explainer || "",
-          comparison: data.comparison || "",
-          followUp: data.followUp || "",
-          sources: Array.isArray(data.sources) ? data.sources : [],
-        };
-        setResult(r);
-        setUsed(new Set());
-        setOpenKey(null);
-        if (!rephrase) {
-          // One pointer = one line offered; counting all six fields made the brief read "24 / 3".
-          if (r.suggestedLine) statsRef.current.surfaced += 1;
-          if (r.concern) statsRef.current.flags += 1;
-        }
-        r.sources.forEach((s) => docsRef.current.add(s.source));
-      }
-    } catch {
-      setNote("Could not reach the AI service.");
-    } finally {
-      inFlightRef.current = false;
-      setLoading(false);
-    }
-  }, []);
-
+  // Keyboard shortcuts for the line the rep reads aloud: Enter = said, R = simpler, Esc = not now.
+  // Only while a line is showing; resolveHotkey ignores modifier combos and any keypress landing in a
+  // field or on a control, so typing in the clarify box and clicking buttons stay untouched.
   useEffect(() => {
-    if (!auto) return;
-    const last = lines[lines.length - 1];
-    if (!last || last.speaker === repName) return;
-    if (lastTriggerRef.current === last.id || !looksLikeQuestion(last.text)) return;
-    lastTriggerRef.current = last.id;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => runSuggest(), 1400);
-  }, [lines, auto, repName, runSuggest]);
-
-  useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+    const onKey = (e: KeyboardEvent) => {
+      const p = pointersRef.current;
+      if (!p.result) return;
+      const t = e.target as HTMLElement | null;
+      const inControl = !!t && (/^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName) || t.isContentEditable);
+      const action = resolveHotkey({ key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, inControl });
+      if (!action) return;
+      e.preventDefault();
+      if (action === "said") {
+        if (!p.used.has("line")) p.markUsed("line");
+      } else if (action === "simpler") {
+        if (!p.loading) p.ask({ rephrase: true });
+      } else {
+        p.dismiss();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const markUsed = (key: string) => {
-    if (used.has(key)) return;
-    setUsed((prev) => new Set(prev).add(key));
-    statsRef.current.used += 1;
-  };
-
-  const end = () => {
-    const transcript = linesRef.current.map((l) => `${l.speaker}: ${l.text}`).join("\n");
+  const end = useCallback(async () => {
+    if (comprehension.ending) return;
+    const record = await comprehension.close();
     const dur = Math.max(1, Math.round((Date.now() - startRef.current) / 60000));
-    onEnd(transcript, { ...statsRef.current, docs: docsRef.current.size }, dur);
-  };
+    onEnd(transcriptText(latest()), pointers.stats(), dur, { record, customerName: consent?.name ?? "" });
+  }, [comprehension, consent?.name, latest, onEnd, pointers]);
 
   const joinUrl = typeof window !== "undefined" ? window.location.origin + session.joinPath : session.joinPath;
   const copy = () => {
@@ -349,20 +164,8 @@ function LiveConsole({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // Derived from flags already on the transcript, never a signal the transcript lacks.
-  const { bars, flagCount } = useMemo(() => {
-    const out = new Array(BUCKETS).fill(0) as number[];
-    let flags = 0;
-    lines.forEach((l, i) => {
-      if (!l.flag) return;
-      flags += 1;
-      out[Math.min(BUCKETS - 1, Math.floor((i / Math.max(1, lines.length)) * BUCKETS))] += 1;
-    });
-    return { bars: out, flagCount: flags };
-  }, [lines]);
-
   // While the rep is muted, drop their half-captured phrase so no stale "live" text lingers.
-  const visibleInterim = micEnabled ? interim : { ...interim, [repName]: "" };
+  const visibleInterim = media.mic === "on" ? interim : { ...interim, [repName]: "" };
 
   // The tile badge is easy to miss mid-call, so a camera failure also gets a notice.
   const camAlert = isBroken(media.cam) ? `${CAM_LABEL[media.cam].hint} The call and your audio are unaffected.` : null;
@@ -379,6 +182,7 @@ function LiveConsole({
             : null;
 
   // Everything that is not the line itself, collapsed to one row each.
+  const result = pointers.result;
   const support = result
     ? ([
         { key: "firstStep", label: "Do first", text: result.firstStep },
@@ -399,6 +203,16 @@ function LiveConsole({
         <span className="c-ctx">
           {session.productArea} · <b>{consent ? consent.name : "awaiting customer"}</b>
         </span>
+        {/* Honesty about the mode: when embeddings are unavailable the detectors fall back to keyword
+            overlap, which is less precise. CONTEXT.md promises the console says so. */}
+        {agent.degraded && (
+          <span
+            className="degraded-tag"
+            title="Embeddings are unavailable, so the assistant is matching on keywords only — detection is less precise this session."
+          >
+            Reduced accuracy · keyword matching
+          </span>
+        )}
         <span className="c-r">
           <button className="pru-btn pru-btn-sm" onClick={copy}>
             {copied ? "✓ Link copied" : "Copy customer link"}
@@ -411,8 +225,8 @@ function LiveConsole({
           >
             {auto ? "Auto-suggest on" : "Auto-suggest off"}
           </button>
-          <button className="btn-end" onClick={end}>
-            End session
+          <button className="btn-end" onClick={end} disabled={comprehension.ending}>
+            {comprehension.ending ? "Closing the record…" : "End session"}
           </button>
         </span>
       </div>
@@ -423,54 +237,146 @@ function LiveConsole({
         </div>
       )}
 
-      <div className="c-top">
-        <Faces media={media} />
-        <div className="c-meta">
-          <div className="strip-h">Where they lost the thread</div>
-          <div className="bars">
-            {bars.map((n, i) => (
-              <span
-                key={i}
-                className={n >= 2 ? "hi" : n === 1 ? "mid" : ""}
-                style={{ height: `${Math.min(92, 16 + n * 34)}%` }}
-              />
-            ))}
+      <div className="console">
+        {/* THE CALL — everything about the live conversation: the faces, the transcript that is the
+            record, and the context chat between the rep and the assistant. */}
+        <div className="call-rail">
+          <Faces media={media} />
+
+          <div className="pane tr">
+            <div className="deck-h">
+              Transcript{media.mic === "off" ? " · paused" : consent ? "" : " · awaiting consent"}
+            </div>
+            <div ref={feedRef} className="tr-body">
+              {lines.length === 0 && Object.values(visibleInterim).every((v) => !v) && (
+                <p className="pru-muted" style={{ fontSize: 12 }}>
+                  Appears here as you and the customer speak. Double-click a line to correct a mis-hearing.
+                </p>
+              )}
+              {lines.slice(-12).map((l) => (
+                <TranscriptLine key={l.id} line={l} isRep={l.speaker === repName} onEdit={editLine} />
+              ))}
+              {Object.entries(visibleInterim).map(([sp, txt]) =>
+                txt ? (
+                  <div key={"i-" + sp} className="tr-line now">
+                    <span className="who">{sp === repName ? "YOU · LIVE" : sp.toUpperCase()}</span>
+                    {txt}
+                  </div>
+                ) : null,
+              )}
+            </div>
           </div>
-          <div className="strip-legend">
-            <span>00:00</span>
-            <span>
-              <b>
-                {flagCount} {flagCount === 1 ? "flag" : "flags"}
-              </b>
-            </span>
-            <span>now</span>
+
+          <ContextChat clarify={pointers.clarify} onSend={pointers.provideContext} />
+        </div>
+
+        {/* THE PROMPTER — what changes the advice (the alert), the line to say, and the backup. */}
+        <div className="prompter">
+      {/* COMPREHENSION — evidence about the customer, never a verdict, and never blocking.
+          It sits above the line because it changes what the rep should say next. */}
+      {agent.alert && (
+        <div className={`comp comp-${agent.alert.kind} pru-enter`} role="status">
+          <div className="comp-h">
+            <span className="cat">{ALERT_CAT[agent.alert.kind]}</span>
+            <span className="conf">{agent.alert.label}</span>
+          </div>
+          <div className="comp-head">{agent.alert.headline}</div>
+          <div className="comp-detail">
+            {agent.alert.quote && <span className="comp-quote">“{agent.alert.quote}”</span>}
+            {agent.alert.detail}
+          </div>
+          <div className="say-wrap">
+            <div className="say">
+              <span className="q">“</span>
+              {agent.alert.teachBack}
+              <span className="q">”</span>
+            </div>
+            <div className="cite">
+              <b>Grounded in</b>
+              <Citations sources={agent.alert.citations} />
+            </div>
+          </div>
+          <div className="say-actions">
+            <button className="said" onClick={() => comprehension.act("teach-back-asked")}>
+              Asked it
+            </button>
+            <button className="ghost" onClick={comprehension.copyTeachBack}>
+              {comprehension.askedCopied ? "✓ Copied" : "Copy question"}
+            </button>
+            <button className="ghost" onClick={() => comprehension.act("dismiss")}>
+              Not now
+            </button>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* THE LINE — the one thing the rep reads mid-conversation. */}
-      <div className="line-block">
-        {loading && !result ? (
+      {agent.unavailable && (
+        <div className="notice bad" style={{ flex: "none" }}>
+          Comprehension tracking is unavailable — the shared session store isn’t reachable, so
+          nothing is being recorded. Pointers and the call are unaffected.
+        </div>
+      )}
+
+      {/* THE LINE — the one thing the rep reads mid-conversation. A polite live region so a
+          screen-reader rep is announced the line to say when it arrives, not left to find it. */}
+      <div className="line-block" aria-live="polite">
+        {pointers.loading && !result ? (
           <>
             <div className="pru-skeleton" style={{ height: 12, width: "30%", marginBottom: 12 }} />
             <div className="pru-skeleton" style={{ height: 22, width: "92%", marginBottom: 8 }} />
             <div className="pru-skeleton" style={{ height: 22, width: "64%" }} />
           </>
+        ) : pointers.mode === "topic_drift" && pointers.note ? (
+          // Off the selected scope: warn, don't generate.
+          <div className="pru-enter drift">
+            <div className="lb-head">
+              <span className="cat">Off topic</span>
+            </div>
+            <div className="concern">{pointers.note}</div>
+          </div>
+        ) : pointers.mode === "drift_paused" && pointers.note ? (
+          // Drifted twice: paused. No model call went out for this turn; it resumes on the first
+          // on-topic turn.
+          <div className="pru-enter paused">
+            <div className="lb-head">
+              <span className="cat">Paused · off topic</span>
+            </div>
+            <div className="concern">{pointers.note}</div>
+          </div>
         ) : !result ? (
           <>
             <div className="lb-head">
               <span className="cat">Listening</span>
+              {agent.prepared && <span className="ready">Answer ready</span>}
             </div>
             <div className="concern">
-              {note ??
+              {pointers.note ??
                 "When the customer asks something, the line to say appears here — grounded in the policy documents, with the page it came from."}
             </div>
+            {/* Speculative work, made visible. The background pass has already written and
+                grounding-checked the answer to the question this customer is most likely to ask
+                next, so if it lands there is no model call to wait for. */}
+            {agent.prepared && !pointers.note && (
+              <div className="ahead">
+                <span className="k">Prepared for</span>
+                <span className="v">
+                  “{agent.prepared.question}”
+                  <span className="on"> · {agent.prepared.label}</span>
+                </span>
+              </div>
+            )}
           </>
         ) : (
           <div className="pru-enter">
             <div className="lb-head">
-              <span className="cat">Detected confusion</span>
-              <span className="conf">{result.sources.length} cited</span>
+              <span className="cat">{RESULT_CAT[pointers.mode ?? ""] ?? "Detected confusion"}</span>
+              {/* A prepared answer is announced, not slipped in: the rep is reading something
+                  written before the question was asked, and should know it. */}
+              {result.cached && <span className="ready">Prepared · verified</span>}
+              <span className="conf">
+                {result.sources.length} cited
+                {pointers.latencyMs !== null && ` · ${pointers.latencyMs} ms`}
+              </span>
             </div>
             {result.concern && <div className="concern">{result.concern}</div>}
             <div className="say-wrap">
@@ -482,20 +388,29 @@ function LiveConsole({
               <div className="cite">
                 <b>Grounded in</b>
                 {result.sources.length ? (
-                  result.sources.map((s, i) => <span key={i}>{s.source}</span>)
+                  <Citations sources={result.sources.map((s) => s.source)} />
                 ) : (
                   <span>no source returned</span>
+                )}
+                {/* Grounding self-check. It labels rather than blocks — the rep decides what to
+                    say, and a hypothetical figure in a question is legitimate. */}
+                {result.unsupportedFigures.length > 0 && (
+                  <span className="cite-warn">Not on these pages: {result.unsupportedFigures.join(", ")}</span>
                 )}
               </div>
             </div>
             <div className="say-actions">
-              <button className="said" onClick={() => markUsed("line")} disabled={used.has("line")}>
-                {used.has("line") ? "✓ Said it" : "Said it"}
+              <button
+                className="said"
+                onClick={() => pointers.markUsed("line")}
+                disabled={pointers.used.has("line")}
+              >
+                {pointers.used.has("line") ? "✓ Said it" : "Said it"}
               </button>
-              <button className="ghost" onClick={() => runSuggest({ rephrase: true })} disabled={loading}>
+              <button className="ghost" onClick={() => pointers.ask({ rephrase: true })} disabled={pointers.loading}>
                 Say it simpler
               </button>
-              <button className="ghost" onClick={() => setResult(null)}>
+              <button className="ghost" onClick={pointers.dismiss}>
                 Not now
               </button>
             </div>
@@ -503,7 +418,6 @@ function LiveConsole({
         )}
       </div>
 
-      <div className="c-bot">
         <div className="pane sup">
           <div className="deck-h">If you need more</div>
           <div className="sup-body pru-scroll">
@@ -516,60 +430,213 @@ function LiveConsole({
                 <button
                   key={r.key}
                   type="button"
-                  className={`sup-row ${openKey === r.key ? "open" : ""}`}
-                  aria-expanded={openKey === r.key}
-                  onClick={() => setOpenKey((k) => (k === r.key ? null : r.key))}
+                  className={`sup-row ${pointers.openKey === r.key ? "open" : ""}`}
+                  aria-expanded={pointers.openKey === r.key}
+                  onClick={() => pointers.setOpenKey((k) => (k === r.key ? null : r.key))}
                 >
                   <span className="k">{r.label}</span>
                   <span className="v">{r.text}</span>
-                  <span className="x">{openKey === r.key ? "−" : "+"}</span>
+                  <span className="x">{pointers.openKey === r.key ? "−" : "+"}</span>
                 </button>
               ))
             )}
           </div>
         </div>
-
-        <div className="pane tr">
-          <div className="deck-h">
-            Transcript{media.mic === "off" ? " · paused" : consent ? "" : " · awaiting consent"}
-          </div>
-          <div ref={feedRef} className="tr-body">
-            {lines.length === 0 && Object.values(visibleInterim).every((v) => !v) && (
-              <p className="pru-muted" style={{ fontSize: 12 }}>
-                Appears here as you and the customer speak.
-              </p>
-            )}
-            {lines.slice(-12).map((l) => (
-              <div key={l.id} className={`tr-line ${l.speaker === repName ? "" : "cust"}`}>
-                <span className="who">{l.speaker === repName ? "YOU" : l.speaker.toUpperCase()}</span>
-                {l.flag ? <span className="mark">{l.text}</span> : l.text}
-              </div>
-            ))}
-            {Object.entries(visibleInterim).map(([sp, txt]) =>
-              txt ? (
-                <div key={"i-" + sp} className="tr-line now">
-                  <span className="who">{sp === repName ? "YOU · LIVE" : sp.toUpperCase()}</span>
-                  {txt}
-                </div>
-              ) : null,
-            )}
-          </div>
         </div>
       </div>
     </div>
   );
 }
 
-const MIC_LABEL: Record<DeviceStatus, { text: string; hint: string }> = {
-  on: { text: "Mic", hint: "Mute microphone" },
-  off: { text: "Muted", hint: "Unmute microphone" },
-  missing: { text: "No microphone", hint: "No microphone detected. Check your OS sound settings, then click to retry." },
-  blocked: { text: "Mic blocked", hint: "The browser is blocking the microphone. Allow it for this site in the address bar, then reload." },
+// Citations for the line, collapsed to one row per document (pages merged) so the sidebar stops
+// repeating the full brochure name on every page reference.
+function Citations({ sources }: { sources: string[] }) {
+  return (
+    <>
+      {groupCitations(sources).map((g, i) => (
+        <span key={i}>
+          {g.doc}
+          {g.pages ? <span className="cite-pp"> · {g.pages}</span> : null}
+        </span>
+      ))}
+    </>
+  );
+}
+
+// One transcript line the rep can correct in place. The browser mishears brand terms and names;
+// double-click to edit, Enter saves, Esc cancels — the fix flows to the record and downstream readers.
+function TranscriptLine({ line, isRep, onEdit }: { line: Line; isRep: boolean; onEdit: (id: string, text: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(line.text);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    if (draft.trim() && draft.trim() !== line.text) onEdit(line.id, draft);
+  };
+  const cancel = () => {
+    setEditing(false);
+    setDraft(line.text);
+  };
+
+  if (editing) {
+    return (
+      <div className={`tr-line ${isRep ? "" : "cust"} editing`}>
+        <span className="who">{isRep ? "YOU" : line.speaker.toUpperCase()}</span>
+        <textarea
+          ref={inputRef}
+          className="tr-edit"
+          rows={2}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          aria-label="Correct this transcript line"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`tr-line ${isRep ? "" : "cust"}`}
+      onDoubleClick={() => {
+        setDraft(line.text);
+        setEditing(true);
+      }}
+      title="Double-click to correct a mis-hearing"
+    >
+      <span className="who">{isRep ? "YOU" : line.speaker.toUpperCase()}</span>
+      {line.flag ? <span className="mark">{line.text}</span> : line.text}
+    </div>
+  );
+}
+
+// The eyebrow over a routed result, by orchestrator mode.
+const RESULT_CAT: Record<string, string> = {
+  policy_guidance: "Detected confusion",
+  comparison: "Comparison",
+  guider: "Suggested move",
 };
 
-const CAM_LABEL: Record<DeviceStatus, { text: string; hint: string }> = {
-  on: { text: "Camera", hint: "Turn camera off" },
-  off: { text: "Camera off", hint: "Turn camera on" },
-  missing: { text: "No camera", hint: "No camera detected. Check your OS settings, then click to retry." },
-  blocked: { text: "Camera blocked", hint: "The browser is blocking the camera. Allow it for this site in the address bar, then reload." },
+function IconChat() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.6-.8L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z" />
+    </svg>
+  );
+}
+
+// The context chat: the assistant asks the rep for context it can't hear, and the rep can volunteer
+// it any time. A floating panel so it never crowds the line the rep is reading — it pulls attention
+// with a dot and auto-opens when the assistant raises a question. Private to the rep, like everything
+// on this console.
+function ContextChat({ clarify, onSend }: { clarify: Clarify | null; onSend: (text: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<{ role: "ai" | "rep"; text: string }[]>([]);
+  const [draft, setDraft] = useState("");
+  const lastAsk = useRef<string | null>(null);
+  const feedRef = useRef<HTMLDivElement>(null);
+
+  // A new clarification joins the thread and opens the panel. The attention dot is derived from the
+  // pending question (clarify && !open), so nothing needs to be tracked here.
+  useEffect(() => {
+    const q = clarify?.question ?? null;
+    if (q && q !== lastAsk.current) {
+      lastAsk.current = q;
+      setMessages((m) => [...m, { role: "ai", text: clarify!.prompt }]);
+      setOpen(true);
+    }
+    if (!q) lastAsk.current = null;
+  }, [clarify]);
+
+  useEffect(() => {
+    if (open) feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight });
+  }, [open, messages]);
+
+  const send = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setMessages((m) => [...m, { role: "rep", text }]);
+    setDraft("");
+    onSend(text);
+  };
+
+  return (
+    <div className="ctx-dock">
+      {open && (
+        <div className="ctx-panel pru-enter" role="dialog" aria-label="Assistant context chat">
+          <div className="ctx-head">
+            <span className="ctx-title">Context · private to you</span>
+            <button className="ctx-x" onClick={() => setOpen(false)} aria-label="Close context chat">
+              ×
+            </button>
+          </div>
+          <div ref={feedRef} className="ctx-feed">
+            {messages.length === 0 ? (
+              <p className="ctx-empty">
+                Tell the assistant what it can’t hear — which options you’re comparing, the customer’s
+                situation, what you’re about to explain. It sharpens the next suggestion, and it asks
+                here when it needs to.
+              </p>
+            ) : (
+              messages.map((m, i) => (
+                <div key={i} className={`ctx-msg ctx-${m.role}`}>
+                  {m.text}
+                </div>
+              ))
+            )}
+          </div>
+          <form className="ctx-form" onSubmit={(e) => { e.preventDefault(); send(); }}>
+            <input
+              className="ctx-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Add context, e.g. comparing Premier with Plus"
+              aria-label="Message the assistant"
+            />
+            <button className="ctx-send" type="submit" disabled={!draft.trim()}>
+              Send
+            </button>
+          </form>
+        </div>
+      )}
+      <button
+        className={`ctx-bar ${clarify ? "asking" : ""}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-label={open ? "Hide context chat" : "Open context chat"}
+        title="Context chat — tell the assistant what it can’t hear"
+      >
+        <IconChat />
+        <span className="ctx-bar-t">Context{clarify ? " · needed" : ""}</span>
+        {clarify && !open && <span className="ctx-dot" aria-hidden="true" />}
+        <span className="ctx-caret" aria-hidden="true">{open ? "▾" : "▴"}</span>
+      </button>
+    </div>
+  );
+}
+
+// The eyebrow above each alert. Named for what was observed, not for a judgement about the person.
+const ALERT_CAT: Record<Alert["kind"], string> = {
+  "false-assent": "Agreed, not demonstrated",
+  misunderstood: "Contradicts the policy",
+  divergence: "Qualifier dropped",
+  "re-ask": "Asked again",
+  "explain-back": "Teach-back graded",
 };

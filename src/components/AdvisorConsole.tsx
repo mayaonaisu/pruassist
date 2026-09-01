@@ -6,9 +6,11 @@ import IntroStep from "./steps/IntroStep";
 import ConsentStep from "./steps/ConsentStep";
 import LiveStep from "./steps/LiveStep";
 import SummaryStep from "./steps/SummaryStep";
-import type { SessionInfo, Stats, SummaryData } from "@/lib/console-types";
+import type { Comprehension, SessionInfo, Stats, SummaryData } from "@/lib/console-types";
 
-function toSummary(raw: unknown): Omit<SummaryData, "stats" | "durationMin"> {
+type Narrative = Pick<SummaryData, "concerns" | "talkingPoints" | "followUps" | "notes" | "briefGenerated">;
+
+function toSummary(raw: unknown): Narrative {
   const o = (raw ?? {}) as Record<string, unknown>;
   const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
   return {
@@ -16,6 +18,8 @@ function toSummary(raw: unknown): Omit<SummaryData, "stats" | "durationMin"> {
     talkingPoints: arr(o.talkingPoints),
     followUps: arr(o.followUps),
     notes: typeof o.notes === "string" ? o.notes : "",
+    // Only an explicit false counts as a failure; a missing flag from an older shape stays optimistic.
+    briefGenerated: o.generated !== false,
   };
 }
 
@@ -30,7 +34,7 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
   }, []);
 
   const onEnded = useCallback(
-    async (transcriptText: string, stats: Stats, durationMin: number) => {
+    async (transcriptText: string, stats: Stats, durationMin: number, comprehension: Comprehension) => {
       if (session) {
         fetch("/api/session/end", {
           method: "POST",
@@ -38,12 +42,7 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
           body: JSON.stringify({ roomId: session.roomId }),
         }).catch(() => {});
       }
-      let data: Omit<SummaryData, "stats" | "durationMin"> = {
-        concerns: [],
-        talkingPoints: [],
-        followUps: [],
-        notes: "",
-      };
+      let data: Narrative = { concerns: [], talkingPoints: [], followUps: [], notes: "", briefGenerated: true };
       try {
         const res = await fetch("/api/summary", {
           method: "POST",
@@ -51,14 +50,19 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
           body: JSON.stringify({ transcript: transcriptText }),
         });
         // The summary screen maps over these arrays, so a bad shape would white-screen the console.
+        // A non-OK response with a real transcript is a generation failure, not a quiet session.
         if (res.ok) data = toSummary(await res.json());
+        else if (transcriptText.trim()) data = { ...data, briefGenerated: false };
       } catch {
-        /* keep empty summary */
+        // Couldn't reach the service — a failure only if there was something to summarise.
+        if (transcriptText.trim()) data = { ...data, briefGenerated: false };
       }
-      setSummary({ ...data, stats, durationMin });
+      // The record is the rep's own signed artifact, so it is signed with the consent signature
+      // they typed at the start of this session — not with a name the server assumed.
+      setSummary({ ...data, ...comprehension, stats, durationMin, signedBy: repName });
       setStep(3);
     },
-    [session],
+    [session, repName],
   );
 
   const reset = useCallback(() => {

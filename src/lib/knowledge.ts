@@ -1,4 +1,6 @@
 // PRUShield / PRUExtra clauses from the public brochure (Apr 2026). Re-verify figures before real advisory use.
+// Adding a new product document? See docs/kb-authoring.md for the extraction-to-clause workflow.
+import { WEB_KNOWLEDGE, WEB_DOCUMENT_AREA } from "./web-knowledge";
 
 export type Clause = { id: string; source: string; text: string };
 
@@ -14,10 +16,26 @@ const DOCUMENT_AREA: Record<string, string> = {
   "PRUPersonal Accident Brochure": "Personal Accident",
   "PRUActive Term Brochure": "Term Life",
   "PRUActive Retirement II Brochure": "Retirement",
+  // Web documents ingested from prudential.com.sg (scripts/ingest-web.mts).
+  ...WEB_DOCUMENT_AREA,
 };
 
 export function productAreas(): string[] {
   return [...new Set(knowledgeDocuments().map((d) => DOCUMENT_AREA[d]).filter(Boolean))];
+}
+
+// The advisory area a clause belongs to, so retrieval can be scoped to the session's product.
+export function areaOfClause(clause: Clause): string | undefined {
+  return DOCUMENT_AREA[clause.source.split(" · ")[0]];
+}
+
+// Clause lookup by id — the concept ledger anchors to ids, so it must resolve them cheaply.
+// Built on first call: KNOWLEDGE is declared below and would be in the temporal dead zone here.
+let byId: Map<string, Clause> | null = null;
+
+export function clauseById(id: string): Clause | undefined {
+  if (!byId) byId = new Map(KNOWLEDGE.map((c) => [c.id, c]));
+  return byId.get(id);
 }
 
 // One row per document with the clause count and page span the retriever can cite.
@@ -35,7 +53,7 @@ export function knowledgeIndex(): DocumentIndex[] {
   });
 }
 
-export const KNOWLEDGE: Clause[] = [
+const BROCHURE_KNOWLEDGE: Clause[] = [
   {
     id: "what-is-prushield",
     source: "PRUShield Product Brochure (Apr 2026) · p.3",
@@ -197,3 +215,7 @@ export const KNOWLEDGE: Clause[] = [
     text: "With PRUActive Retirement II the customer decides when payouts start and end — as early as age 50, received for up to 30 years — and can adjust the payout period as needs change. The premium term is flexible: a lump sum in the first year, or spread over a longer period.",
   },
 ];
+
+// The hand-authored brochure clauses plus whatever has been ingested from the website — tagged and
+// cited to the page URL. Retrieval and grounding treat both alike; only the brochure anchors concepts.
+export const KNOWLEDGE: Clause[] = [...BROCHURE_KNOWLEDGE, ...WEB_KNOWLEDGE];

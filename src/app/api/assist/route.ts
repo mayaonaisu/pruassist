@@ -1,81 +1,146 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
 import { currentRep } from "@/lib/auth";
-import { retrieve } from "@/lib/retrieval";
+import { getByRoom } from "@/lib/sessions";
+import { loadState } from "@/lib/agent/ledger";
+import { matchesLookahead } from "@/lib/agent/cache";
+import { runOrchestrator } from "@/lib/agent/orchestrator/graph";
+import {
+  clearDrift,
+  judgePausedTurn,
+  loadDrift,
+  pausedMessage,
+  recordDrift,
+  RESETS_DRIFT,
+  type DriftState,
+} from "@/lib/agent/orchestrator/drift";
+import type { Mode, OrchestratorInput } from "@/lib/agent/orchestrator/types";
+import { emptyState } from "@/lib/agent/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// The orchestrator can stack a brain call, a bounded tool loop, and a generation on a cache miss,
+// which can exceed Vercel's default 10s function limit. Give the live path real headroom so
+// serverless does not 504 a slow-but-valid agentic answer; a cache hit still returns in well under
+// a second, and the live tool loop is capped (handlers.ts) to keep the common case far below this.
+export const maxDuration = 60;
 
-// Fast Gemini model for low-latency live suggestions.
-const MODEL = "gemini-3.6-flash";
+// The live path, and the front door of the orchestrator. The cache short-circuit stays first (a
+// prepared answer costs no model call); on a miss the LangGraph orchestrator decides the mode and
+// routes. Comprehension tracking still lives behind /api/agent/state, untouched.
 
 export async function POST(req: NextRequest) {
-  // Rep-only: this route spends billed Gemini calls.
+  // Rep-only: this route can spend billed model calls.
   if (!(await currentRep())) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ note: "Add GEMINI_API_KEY to .env.local to enable AI pointers." });
-  }
-
-  const { transcript } = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => ({}));
+  const { transcript, roomId, asked, clarifyContext } = body ?? {};
   if (!transcript || typeof transcript !== "string") {
     return NextResponse.json({ error: "Missing 'transcript'." }, { status: 400 });
   }
 
-  // 1) RETRIEVE the most relevant Prudential clauses for what was just said.
-  const hits = await retrieve(transcript, 3);
-  if (!hits.length) {
-    // No clause means no grounded citation, so say nothing rather than invent one.
-    return NextResponse.json({ note: "No policy clause covers this yet — keep listening, or ask the customer to be more specific." });
-  }
-  const context = hits.map((h, i) => `[${i + 1}] (${h.source})\n${h.text}`).join("\n\n");
+  const t0 = Date.now();
 
-  // 2) GENERATE a structured set of private pointers, grounded in those clauses.
-  const ai = new GoogleGenAI({ apiKey });
-  try {
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: `POLICY CLAUSES:\n${context}\n\nRECENT TRANSCRIPT:\n${transcript}`,
-      config: {
-        systemInstruction:
-          "You are PRUAssist, a PRIVATE co-pilot for a Prudential financial representative during a LIVE " +
-          "conversation about Health Protection (PRUShield) insurance. Use ONLY the POLICY CLAUSES provided — do not " +
-          "invent figures, product names or coverage. Produce concise private pointers for the representative. The " +
-          "customer never sees these. Respond ONLY with JSON of this shape:\n" +
-          '{"concern": string,            // the customer concern/confusion you detect\n' +
-          ' "firstStep": string,          // what the rep should do or check first\n' +
-          ' "suggestedLine": string,      // one natural line the rep could say to open\n' +
-          ' "explainer": string,          // a plain-language explanation grounded in the clauses\n' +
-          ' "comparison": string,         // a short comparison pointer if relevant, else ""\n' +
-          ' "followUp": string}           // a follow-up question to surface the customer\'s priority',
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 0 },
-        temperature: 0.3,
-        maxOutputTokens: 800,
-      },
-    });
+  // roomId is optional on purpose: a tab left open from an earlier session must not start failing
+  // mid-demo. Without it there is no product area, no prepared answer, and no drift state.
+  const rid = typeof roomId === "string" && roomId ? roomId : null;
 
-    const text = (response.text ?? "").trim();
-    let p: Record<string, unknown> = {};
-    try {
-      p = JSON.parse(text);
-    } catch {
-      p = { explainer: text };
+  // Parallel Redis reads: session, state, and drift are keyed on roomId alone — no data dependency
+  // between them. Firing concurrently cuts 3 sequential round-trips to 1.
+  const [session, rawState, rawDrift] = rid
+    ? await Promise.all([getByRoom(rid), loadState(rid, "Health Protection"), loadDrift(rid)])
+    : [null, null, { count: 0, pausedAt: null } as DriftState];
+  const productArea = session?.context.productArea;
+  const state = session && rid ? (productArea && productArea !== "Health Protection" ? await loadState(rid, productArea) : rawState) : null;
+
+  const tRedis = Date.now() - t0;
+
+  const scope = productArea ?? "Health Protection";
+  const orchState = state ?? emptyState(rid ?? "anon", scope);
+  const orchInput: OrchestratorInput = {
+    asked: typeof asked === "string" ? asked : "",
+    transcript,
+    state: orchState,
+    scope,
+    clarifyContext: typeof clarifyContext === "string" && clarifyContext.trim() ? clarifyContext : undefined,
+  };
+
+  // 0) DRIFT — if the conversation is paused for drifting off scope, judge whether this turn brings
+  // it back (one brain call, no Gemini) before spending anything else. Paused means paused: the
+  // cache is skipped too. Only a real session gets a drift streak; a stale/anon tab bypasses it.
+  const driftRoom = session ? rid : null;
+  let presetMode: Mode | undefined;
+  let drift: DriftState = rawDrift;
+  if (driftRoom) {
+    if (drift.pausedAt) {
+      const verdict = await judgePausedTurn(orchInput);
+      if ("resume" in verdict) {
+        await clearDrift(driftRoom);
+        presetMode = verdict.resume; // skip the graph's router: judgePausedTurn already classified
+      } else {
+        return NextResponse.json({ mode: "drift_paused", note: pausedMessage(scope) });
+      }
     }
-    const str = (v: unknown) => (typeof v === "string" ? v : "");
-
-    return NextResponse.json({
-      concern: str(p.concern),
-      firstStep: str(p.firstStep),
-      suggestedLine: str(p.suggestedLine),
-      explainer: str(p.explainer),
-      comparison: str(p.comparison),
-      followUp: str(p.followUp),
-      sources: hits.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) })),
-    });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "AI request failed.";
-    return NextResponse.json({ note: `AI error: ${message}` });
   }
+
+  // 1) CACHE — did the background pass already prepare, and verify, the answer to this question?
+  if (state) {
+    const question = typeof asked === "string" && asked.trim() ? asked : (transcript.split("\n").slice(-1)[0] ?? "");
+    const check = await matchesLookahead(state.lookahead, question);
+    if (check.hit && state.lookahead) {
+      const l = state.lookahead;
+      // A served answer is an in-scope turn — end any drift streak.
+      if (driftRoom && drift.count > 0) await clearDrift(driftRoom);
+      console.log(`[assist] redis=${tRedis}ms cache-hit total=${Date.now() - t0}ms`);
+      return NextResponse.json({
+        mode: "policy_guidance",
+        ...l.pointers,
+        sources: l.sources,
+        cached: true,
+        prepared: { conceptId: l.conceptId, label: l.label, question: l.question, at: l.preparedAt, match: Number(check.score.toFixed(3)) },
+        verified: l.verified,
+        unsupportedFigures: [],
+      });
+    }
+  }
+
+  // 2) ORCHESTRATE — the brain (or the deterministic fallback) decides the mode; LangGraph routes
+  // to the matching handler. The safety spine (readiness) is not here — it rides the state poll.
+  const tOrch0 = Date.now();
+  const result = await runOrchestrator({ ...orchInput, presetMode });
+  const tOrch = Date.now() - tOrch0;
+  console.log(`[assist] redis=${tRedis}ms orch=${tOrch}ms total=${Date.now() - t0}ms mode=${result.mode}`);
+
+  // 3) DRIFT bookkeeping — a substantive answer ends the streak; a repeat drift advances it and
+  // pauses on the second consecutive one. keep_listening leaves the streak untouched.
+  if (driftRoom) {
+    if (RESETS_DRIFT.has(result.mode)) {
+      if (drift.count > 0) await clearDrift(driftRoom);
+    } else if (result.mode === "topic_drift") {
+      const next = await recordDrift(driftRoom, drift);
+      if (next.pausedAt) return NextResponse.json({ mode: "drift_paused", note: pausedMessage(scope) });
+      // else this is the first drift — fall through to the one-time warning below.
+    }
+  }
+
+  // 4) MAP the mode result onto the response the console renders.
+  if (result.mode === "keep_listening") {
+    return NextResponse.json({ mode: result.mode, note: null });
+  }
+  if (result.mode === "topic_drift") {
+    return NextResponse.json({ mode: result.mode, note: result.drift?.message, drift: result.drift });
+  }
+  if (result.mode === "clarification") {
+    return NextResponse.json({ mode: result.mode, clarify: result.clarify });
+  }
+  if (result.note && !result.pointers) {
+    return NextResponse.json({ mode: result.mode, note: result.note });
+  }
+  return NextResponse.json({
+    mode: result.mode,
+    ...(result.pointers ?? {}),
+    sources: result.sources ?? [],
+    cached: false,
+    comparing: result.comparing ?? false,
+    unsupportedFigures: result.unsupportedFigures ?? [],
+  });
 }

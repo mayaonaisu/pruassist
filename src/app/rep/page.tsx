@@ -12,6 +12,18 @@ export default async function RepPage() {
 
   if (!session) redirect("/login");
 
+  // Show the name the way a name is written — "bryan" → "Bryan" — while still following whatever the
+  // rep typed at sign-in.
   const username = String(session.name ?? session.sub ?? "Representative");
-  return <AdvisorConsole repName={username} />;
+  return <AdvisorConsole repName={prettifyName(username)} />;
+}
+
+function prettifyName(s: string): string {
+  return (
+    s
+      .trim()
+      .split(/\s+/)
+      .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+      .join(" ") || "Representative"
+  );
 }

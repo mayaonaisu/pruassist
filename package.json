@@ -6,10 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "replay": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/replay.mts",
+    "replay:all": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/replay.mts fixtures/false-assent.json fixtures/panel-misconception.json fixtures/re-ask.json fixtures/explain-back.json fixtures/teach-back-correct.json fixtures/teach-back-partial.json fixtures/off-topic.json fixtures/tier-decision.json",
+    "check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs --test scripts/checks.mts",
+    "stt:check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/stt-check.mts",
+    "ingest:web": "node ./node_modules/tsx/dist/cli.mjs scripts/ingest-web.mts",
+    "e2e": "node --env-file-if-exists=.env.local scripts/e2e.mjs",
+    "drive": "node --env-file-if-exists=.env.local scripts/drive.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.12",
     "@livekit/components-react": "^2.9.21",
     "@livekit/components-styles": "^1.2.0",
     "@upstash/redis": "^1.38.2",
@@ -26,6 +35,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "tsx": "^4.23.12",
     "typescript": "^5"
   }
 }
