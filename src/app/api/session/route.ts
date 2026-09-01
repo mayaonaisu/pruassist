@@ -29,8 +29,11 @@ export async function POST(req: NextRequest) {
     focus: Array.isArray(body.focus) ? body.focus.filter((f: unknown) => typeof f === "string") : [],
   };
 
-  const s = await createSession(repName, context);
-  return NextResponse.json({ joinToken: s.joinToken, roomId: s.roomId, joinPath: `/c/${s.joinToken}` });
+  // In-person mode: one shared iPad, no LiveKit room. Anything else is the online video call.
+  const mode = body.mode === "in_person" ? "in_person" : "online";
+
+  const s = await createSession(repName, context, mode);
+  return NextResponse.json({ joinToken: s.joinToken, roomId: s.roomId, joinPath: `/c/${s.joinToken}`, mode: s.mode });
 }
 
 // Customer looks up a session by its link token (returns safe info only).

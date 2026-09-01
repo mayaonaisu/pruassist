@@ -14,23 +14,27 @@ export async function POST(req: NextRequest) {
 
   const { roomId } = await req.json().catch(() => ({}));
   if (!roomId) return NextResponse.json({ error: "Missing roomId." }, { status: 400 });
-  await endSession(roomId);
+  const ended = await endSession(roomId);
   // The comprehension evidence is quoted customer speech. It has done its job once the record is
   // in the rep's hands, so it goes now rather than waiting out its 24-hour TTL.
   await clearAgentState(roomId);
   await clearDrift(roomId);
 
-  // Disconnect the customer (and anyone else) by deleting the LiveKit room.
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
-  const wsUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
-  const httpUrl = wsUrl?.replace(/^wss:/i, "https:").replace(/^ws:/i, "http:");
-  if (apiKey && apiSecret && httpUrl) {
-    try {
-      const svc = new RoomServiceClient(httpUrl, apiKey, apiSecret);
-      await svc.deleteRoom(roomId);
-    } catch {
-      /* room may already be gone — ignore */
+  // In-person sessions never opened a LiveKit room, so there is nothing to delete. Old records
+  // predate the mode field and read as undefined here — still treated as online, so they delete.
+  if (ended?.mode !== "in_person") {
+    // Disconnect the customer (and anyone else) by deleting the LiveKit room.
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const wsUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+    const httpUrl = wsUrl?.replace(/^wss:/i, "https:").replace(/^ws:/i, "http:");
+    if (apiKey && apiSecret && httpUrl) {
+      try {
+        const svc = new RoomServiceClient(httpUrl, apiKey, apiSecret);
+        await svc.deleteRoom(roomId);
+      } catch {
+        /* room may already be gone — ignore */
+      }
     }
   }
 

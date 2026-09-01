@@ -1,4 +1,5 @@
 import type { RecordRow } from "./agent/types";
+import type { SessionMode } from "./sessions";
 
 export type SessionInfo = {
   joinToken: string;
@@ -6,6 +7,7 @@ export type SessionInfo = {
   joinPath: string;
   productArea: string;
   focus: string[];
+  mode: SessionMode;
 };
 
 export type Stats = { surfaced: number; used: number; flags: number; docs: number };

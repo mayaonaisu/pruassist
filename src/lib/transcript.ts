@@ -53,6 +53,23 @@ export function applyLineEdit(lines: Line[], id: string, text: string): Line[] {
   return lines.map((l) => (l.id === id ? { ...l, text: next } : l));
 }
 
+// In-person mode: the rep can reassign a mis-attributed line with one tap. Flip it between the rep and
+// the customer, re-deriving the question flag the same way a freshly-heard line gets it (a customer
+// line may warrant a pointer; a rep line never does). An unknown id is a referential no-op, matching
+// applyLineEdit's contract.
+export function applySpeakerSwap(lines: Line[], id: string, repName: string, customerName: string): Line[] {
+  if (!lines.some((l) => l.id === id)) return lines;
+  return lines.map((l) => {
+    if (l.id !== id) return l;
+    const toCustomer = l.speaker === repName;
+    return {
+      ...l,
+      speaker: toCustomer ? customerName : repName,
+      flag: toCustomer ? looksLikeQuestion(l.text) : false,
+    };
+  });
+}
+
 // Collapse a suggested line's citations for display: one row per document, its pages merged and
 // de-duplicated in first-seen order — the sidebar was repeating the full brochure name on every row.
 export function groupCitations(sources: string[]): { doc: string; pages: string }[] {

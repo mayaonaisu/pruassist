@@ -5,7 +5,7 @@ import { IconArrow, IconLogout } from "../icons";
 import DocumentsInScope from "../DocumentsInScope";
 
 const NEXT = [
-  { n: "01", title: "Consent & context", body: "Confirm consent, set the meeting focus, and send the customer a private link." },
+  { n: "01", title: "Consent & context", body: "Confirm consent, set the meeting focus, and either send the customer a private link or hand them this device to consent in person." },
   { n: "02", title: "Live session", body: "Speak normally. Private pointers appear on your side only, as the conversation runs." },
   { n: "03", title: "Advisor brief", body: "A written record of what they asked, what you answered, and what is still open." },
 ];
@@ -58,7 +58,7 @@ export default function IntroStep({ repName, onStart }: { repName: string; onSta
         <button className="pru-btn pru-btn-primary" onClick={onStart}>
           Start advisory session <IconArrow size={15} />
         </button>
-        <span className="hint">You send the customer a link on the next screen</span>
+        <span className="hint">You choose online or in-person on the next screen</span>
       </div>
     </div>
   );

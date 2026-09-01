@@ -1835,3 +1835,55 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- in-person mode ---------- */
+
+/* The "who's speaking" attribution control in the rail — the always-wins manual override. A
+   segmented row of chip-like options; 44px tall so it is a comfortable touch target on the iPad. */
+.turn-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--brochure-2);
+}
+.turn-opt {
+  font: 400 12px var(--font-sans);
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn-opt.on {
+  background: var(--pru);
+  color: var(--brochure);
+}
+
+/* Per-line "swap speaker" affordance, in-person only. Sits at the end of a transcript line; a
+   comfortable tap target without blowing up the 12px line. */
+.tr-line .tr-swap {
+  margin-left: 8px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-xs);
+  background: var(--brochure-2);
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.tr-line .tr-swap:hover {
+  color: var(--pru);
+  border-color: var(--pru);
+}

@@ -39,7 +39,9 @@ const { prepare, runSignals } = await import("../src/lib/agent/signals.ts");
 const { detectAssent, detectDivergence, detectLatency, detectRaised, detectReAsk, detectUptake } = await import("../src/lib/agent/detectors.ts");
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
-const { lastFromCustomer, newestAt, toTurns, windowToSend, applyLineEdit, groupCitations } = await import("../src/lib/transcript.ts");
+const { lastFromCustomer, newestAt, toTurns, windowToSend, applyLineEdit, applySpeakerSwap, groupCitations } = await import("../src/lib/transcript.ts");
+const { splitRuns, emptySpeakerMap, attributeFinal, interimRole } = await import("../src/lib/diarize.ts");
+const { createResampler, floatTo16BitPCM } = await import("../src/lib/pcm.ts");
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
 const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
@@ -1122,4 +1124,122 @@ test("kb: removeSource drops it from the shared list", async () => {
   const s = await addTextSource({ label: "n", area: "KB-Test-C", text: "Content long enough to chunk into a clause for the removal test to work." });
   await removeSource(s.id);
   assert.ok(!(await listSources()).some((x) => x.id === s.id));
+});
+
+// ---------- in-person diarization: splitter, mapper, PCM, speaker swap ----------
+
+const word = (w: string, speaker: number | undefined, punct?: string) =>
+  ({ word: w, speaker, start: 0, end: 0, ...(punct !== undefined ? { punctuated_word: punct } : {}) });
+
+test("splitRuns: splits a diarized final into one line-run per consecutive speaker", () => {
+  const runs = splitRuns([word("a", 0), word("b", 0), word("c", 1), word("d", 1), word("e", 0)]);
+  assert.strictEqual(runs.length, 3);
+  assert.deepStrictEqual(runs.map((r) => r.speakerIndex), [0, 1, 0]);
+  assert.deepStrictEqual(runs.map((r) => r.text), ["a b", "c d", "e"]);
+});
+
+test("splitRuns: a single-speaker final is one run", () => {
+  const runs = splitRuns([word("hello", 2), word("there", 2)]);
+  assert.strictEqual(runs.length, 1);
+  assert.strictEqual(runs[0].text, "hello there");
+  assert.strictEqual(runs[0].speakerIndex, 2);
+});
+
+test("splitRuns: missing or empty words produce no runs", () => {
+  assert.deepStrictEqual(splitRuns(undefined), []);
+  assert.deepStrictEqual(splitRuns([]), []);
+  // A metadata / diarize-off frame: words present but no speaker index — unattributable, not a throw.
+  assert.deepStrictEqual(splitRuns([word("um", undefined), word("okay", undefined)]), []);
+});
+
+test("splitRuns: prefers punctuated_word over word", () => {
+  const runs = splitRuns([word("hello", 0, "Hello,"), word("there", 0, "there.")]);
+  assert.strictEqual(runs[0].text, "Hello, there.");
+});
+
+test("attributeFinal: the first speaker index binds to the rep (consent-script calibration)", () => {
+  const r = attributeFinal(emptySpeakerMap(), splitRuns([word("welcome", 0)]), null);
+  assert.strictEqual(r.lines[0].role, "rep");
+  assert.strictEqual(r.map.assigned[0], "rep");
+  assert.strictEqual(r.lastRole, "rep");
+});
+
+test("attributeFinal: the first differing index binds to the customer", () => {
+  const a = attributeFinal(emptySpeakerMap(), splitRuns([word("hi", 0)]), null);
+  const b = attributeFinal(a.map, splitRuns([word("yes", 1)]), null);
+  assert.strictEqual(b.lines[0].role, "customer");
+  assert.strictEqual(b.map.assigned[1], "customer");
+});
+
+test("attributeFinal: an unseen third index defaults to customer", () => {
+  const map = { assigned: { 0: "rep" as const, 1: "customer" as const }, calibrated: true };
+  const r = attributeFinal(map, splitRuns([word("mm", 2)]), null);
+  assert.strictEqual(r.lines[0].role, "customer");
+  assert.strictEqual(r.map.assigned[2], "customer");
+});
+
+test("attributeFinal: override forces the role and rebinds a single-run final's index", () => {
+  const map = { assigned: { 0: "rep" as const }, calibrated: true };
+  const forced = attributeFinal(map, splitRuns([word("actually", 0)]), "customer");
+  assert.strictEqual(forced.lines[0].role, "customer");
+  assert.strictEqual(forced.map.assigned[0], "customer"); // rebound
+  // and the next auto final on that index now reads customer (relabel recovery)
+  const next = attributeFinal(forced.map, splitRuns([word("right", 0)]), null);
+  assert.strictEqual(next.lines[0].role, "customer");
+});
+
+test("attributeFinal: override on a multi-run final forces roles but does not rebind", () => {
+  const map = { assigned: { 0: "rep" as const, 1: "customer" as const }, calibrated: true };
+  const r = attributeFinal(map, splitRuns([word("a", 0), word("b", 1)]), "customer");
+  assert.deepStrictEqual(r.lines.map((l) => l.role), ["customer", "customer"]);
+  assert.deepStrictEqual(r.map.assigned, { 0: "rep", 1: "customer" }); // unchanged
+});
+
+test("interimRole: goes to the override, else the last final's role, else the rep", () => {
+  assert.strictEqual(interimRole("customer", "rep"), "customer");
+  assert.strictEqual(interimRole(null, "customer"), "customer");
+  assert.strictEqual(interimRole(null, null), "rep");
+});
+
+test("pcm: 48k->16k output length is one third and a constant signal stays constant", () => {
+  const rs = createResampler(48000, 16000);
+  const out = rs.push(new Float32Array(48000).fill(0.5));
+  assert.ok(Math.abs(out.length - 16000) <= 1, `len ${out.length}`);
+  assert.ok(out.every((v) => v === 0.5)); // linear interpolation of a constant is exact
+});
+
+test("pcm: non-integer ratios (44100, 22050 -> 16000) carry phase across chunks", () => {
+  for (const rate of [44100, 22050]) {
+    const rs = createResampler(rate, 16000);
+    const chunk = new Float32Array(160).fill(0.25);
+    const chunks = 50;
+    let total = 0;
+    for (let i = 0; i < chunks; i++) total += rs.push(chunk).length;
+    const expected = (160 * chunks * 16000) / rate;
+    assert.ok(Math.abs(total - expected) <= 2, `rate ${rate}: got ${total}, expected ~${expected}`);
+  }
+});
+
+test("pcm: floats clamp and encode little-endian int16", () => {
+  const buf = floatTo16BitPCM(new Float32Array([1.0, -1.0, 2.0, 0]));
+  const view = new DataView(buf);
+  assert.strictEqual(view.getInt16(0, true), 32767);
+  assert.strictEqual(view.getInt16(2, true), -32768);
+  assert.strictEqual(view.getInt16(4, true), 32767); // 2.0 clamps to full scale
+  assert.strictEqual(view.getInt16(6, true), 0);
+});
+
+test("applySpeakerSwap: swapping to customer re-derives the question flag; swapping to rep clears it", () => {
+  const line = { id: "x", at: 1, speaker: "Bryan", text: "what does the deductible cover?", flag: false };
+  const toCust = applySpeakerSwap([line], "x", "Bryan", "Mrs Tan");
+  assert.strictEqual(toCust[0].speaker, "Mrs Tan");
+  assert.strictEqual(toCust[0].flag, true);
+  const back = applySpeakerSwap(toCust, "x", "Bryan", "Mrs Tan");
+  assert.strictEqual(back[0].speaker, "Bryan");
+  assert.strictEqual(back[0].flag, false);
+});
+
+test("applySpeakerSwap: swap with an unknown id returns the same array", () => {
+  const lines = [{ id: "x", at: 1, speaker: "Bryan", text: "hello there friend", flag: false }];
+  assert.strictEqual(applySpeakerSwap(lines, "nope", "Bryan", "Mrs Tan"), lines);
 });

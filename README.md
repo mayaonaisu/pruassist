@@ -24,13 +24,15 @@ Built for the **PolyFinTech API100 Hackathon 2026** (Prudential "Insurance Navig
 6. In parallel, a slower pass tracks **what the customer has actually demonstrated** — not what they agreed to. When someone says "okay, that makes sense" without ever using the idea in their own words, the rep is told so privately, and given the question that would settle it.
 7. On ending the session, the transcript is summarised into an **advisor brief**, and the comprehension evidence becomes an **Understanding Record**: per concept, what state it reached, the customer's own timestamped words, and the brochure pages it was grounded in.
 
+**In-person mode.** For a face-to-face meeting on one iPad, the rep picks **In person** on the consent screen instead of sending a link — no video call, no second device. The iPad's microphone hears the room, Deepgram streaming transcribes it with **speaker diarization**, and each line is attributed to the rep or the customer (calibrated from who speaks first, with an always-wins "who's speaking" toggle and a per-line ⇄ correction; if Deepgram is unavailable it falls back to that toggle). The customer reads the same disclosures and consents on the shared iPad. Everything downstream — ledger, alerts, readiness, Understanding Record — is identical; only the capture layer changes. Design notes: `docs/in-person-mode-research.md`.
+
 ## Routes
 
 | Route | Who | What |
 |-------|-----|------|
 | `/` | anyone | Landing page → "Representative sign in" |
 | `/login` | rep | Sign in — sets a signed, httpOnly session cookie (8-hour expiry) |
-| `/rep` | rep (protected) | The console: Ready → Consent → Live → Brief. Redirects to `/login` when signed out. |
+| `/rep` | rep (protected) | The console: Ready → Consent (online **or** in-person) → Live → Brief. Redirects to `/login` when signed out. |
 | `/c/[token]` | customer | Private per-session link: consent → camera/mic preview → **video-only** call |
 
 ---

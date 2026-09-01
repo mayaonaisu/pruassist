@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
   // cache is skipped too. Only a real session gets a drift streak; a stale/anon tab bypasses it.
   const driftRoom = session ? rid : null;
   let presetMode: Mode | undefined;
-  let drift: DriftState = rawDrift;
+  const drift: DriftState = rawDrift;
   if (driftRoom) {
     if (drift.pausedAt) {
       const verdict = await judgePausedTurn(orchInput);

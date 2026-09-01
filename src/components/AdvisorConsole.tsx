@@ -5,6 +5,7 @@ import Chrome from "./Chrome";
 import IntroStep from "./steps/IntroStep";
 import ConsentStep from "./steps/ConsentStep";
 import LiveStep from "./steps/LiveStep";
+import InPersonLiveStep from "./steps/InPersonLiveStep";
 import SummaryStep from "./steps/SummaryStep";
 import type { Comprehension, SessionInfo, Stats, SummaryData } from "@/lib/console-types";
 
@@ -78,7 +79,12 @@ export default function AdvisorConsole({ repName }: { repName: string }) {
         <div key={step} className="pru-enter">
           {step === 0 && <IntroStep repName={repName} onStart={() => setStep(1)} />}
           {step === 1 && <ConsentStep repName={repName} onBack={() => setStep(0)} onStarted={onStarted} />}
-          {step === 2 && session && <LiveStep repName={repName} session={session} onEnd={onEnded} />}
+          {step === 2 && session &&
+            (session.mode === "in_person" ? (
+              <InPersonLiveStep repName={repName} session={session} onEnd={onEnded} />
+            ) : (
+              <LiveStep repName={repName} session={session} onEnd={onEnded} />
+            ))}
           {step === 3 && summary && (
             <SummaryStep summary={summary} productArea={session?.productArea ?? "Health Protection"} onNewSession={reset} />
           )}

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { SessionInfo } from "@/lib/console-types";
+import type { SessionMode } from "@/lib/sessions";
 import DocumentsInScope from "../DocumentsInScope";
 import { conceptAreas } from "@/lib/concepts";
 
@@ -34,6 +35,7 @@ export default function ConsentStep({
 }) {
   const [agree, setAgree] = useState(false);
   const [signature, setSignature] = useState(repName === "Representative" ? "" : repName);
+  const [mode, setMode] = useState<SessionMode>("online");
   const [productArea, setProductArea] = useState(AREAS[0] ?? "Health Protection");
   const [focus, setFocus] = useState<string[]>(FOCUS.slice(0, 2));
   const [busy, setBusy] = useState(false);
@@ -49,7 +51,7 @@ export default function ConsentStep({
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productArea, focus, repName: signature.trim() }),
+        body: JSON.stringify({ productArea, focus, mode, repName: signature.trim() }),
       });
       // /rep is gated on page load only, so an 8-hour-old console fails here rather than earlier.
       if (res.status === 401) {
@@ -60,7 +62,7 @@ export default function ConsentStep({
         const data = await res.json().catch(() => ({}));
         throw new Error(typeof data.error === "string" ? data.error : "Could not start the session.");
       }
-      onStarted({ ...(await res.json()), productArea, focus });
+      onStarted({ ...(await res.json()), productArea, focus, mode });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start the session.");
       setBusy(false);
@@ -74,7 +76,9 @@ export default function ConsentStep({
       </button>
       <h1 className="doc-title">Before we start recording</h1>
       <div className="doc-sub">
-        Both parties consent on their own device. Nothing is captured until the customer accepts on theirs.
+        {mode === "in_person"
+          ? "You'll hand this iPad to the customer after starting — they read the disclosures and accept on this screen. Nothing is captured until they do."
+          : "Both parties consent on their own device. Nothing is captured until the customer accepts on theirs."}
       </div>
 
       {/* The configuration reads as a sentence the rep would actually say. */}
@@ -82,6 +86,27 @@ export default function ConsentStep({
         Today&rsquo;s session covers <span className="slot">{productArea}</span>, focusing on{" "}
         <span className="slot multi">{asPhrase(focus)}</span>.
       </p>
+
+      <div className="sec">
+        <div className="sec-h">Meeting type</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {([
+            ["online", "Online call"],
+            ["in_person", "In person"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={mode === value}
+              className={`pru-chip ${mode === value ? "on" : ""}`}
+              onClick={() => setMode(value)}
+            >
+              {mode === value ? "✓ " : ""}
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="sec">
         <div className="sec-h">Product area</div>
@@ -152,14 +177,15 @@ export default function ConsentStep({
         <div className="consent">
           <div className="h">
             <span className="t">Customer</span>
-            <span className="chip wait">AWAITING</span>
+            <span className="chip wait">{mode === "in_person" ? "IN PERSON" : "AWAITING"}</span>
           </div>
           <p>
-            Sent to their device via private link once you start. They accept there — you can&rsquo;t accept on their
-            behalf, and they aren&rsquo;t transcribed until they do.
+            {mode === "in_person"
+              ? "You'll hand this iPad to the customer after starting. They read the disclosures and accept on this screen — you can't accept on their behalf, and nothing is captured until they do."
+              : "Sent to their device via private link once you start. They accept there — you can't accept on their behalf, and they aren't transcribed until they do."}
           </p>
           <div className="await">—</div>
-          <span className="sigcap">LINK NOT YET SENT</span>
+          <span className="sigcap">{mode === "in_person" ? "HANDED OVER AFTER START" : "LINK NOT YET SENT"}</span>
         </div>
       </div>
 
