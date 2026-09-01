@@ -9,9 +9,12 @@ import type { Hit } from "../retrieval";
 // this can never regress a deploy that has not set the key.
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-// gpt-4o-mini: fast and cheap, and off the rep's critical path (this is background work), so latency
-// matters less than not hitting Gemini's free-tier daily cap. Overridable.
-const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
+// gpt-4o by default: measurably more careful than gpt-4o-mini on this corpus — it declines to invent
+// figures in a suggested line ("reduces out-of-pocket costs significantly" vs mini's fabricated
+// "to S$0.00") and its grades are at least as good (replay:all 8/8 on both). These are background /
+// fallback calls off the rep's critical path (live generation is Groq), so the extra latency and cost
+// over mini buy real quality. Overridable with OPENAI_MODEL — set it to gpt-4o-mini to cut cost.
+const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-4o";
 
 export const openaiEnabled = (): boolean => !!process.env.OPENAI_API_KEY?.trim();
 
