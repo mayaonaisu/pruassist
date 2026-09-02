@@ -40,9 +40,17 @@ export function getPdf(file: string): Promise<PDFDocumentProxy> {
     cache.set(file, hit);
     return hit.promise;
   }
-  // wasmUrl points at the pdfjs runtime wasm (OpenJPEG/JBIG2/QCMS) copied into public/pdfjs/wasm. The
-  // brochures embed JPEG2000 images; without it those images fail to decode and the render stalls.
-  const task = getDocument({ url: file, wasmUrl: "/pdfjs/wasm/" });
+  // The pdfjs runtime assets are copied into public/pdfjs and served from origin-absolute paths so they
+  // resolve under Turbopack: wasmUrl (OpenJPEG/JBIG2/QCMS — the brochures embed JPEG2000 images, which
+  // otherwise stall the render), standardFontDataUrl (the base-14 fonts) and iccUrl (colour profiles).
+  // Without them pdfjs probes default paths that 404. cMapUrl is omitted: the brochures are English and
+  // reference no predefined CJK CMap, so the ~1.5 MB cmaps set is not shipped.
+  const task = getDocument({
+    url: file,
+    wasmUrl: "/pdfjs/wasm/",
+    standardFontDataUrl: "/pdfjs/standard_fonts/",
+    iccUrl: "/pdfjs/iccs/",
+  });
   cache.set(file, task);
   while (cache.size > MAX) {
     const oldest = cache.keys().next().value;

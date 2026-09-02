@@ -1887,3 +1887,331 @@ button {
   color: var(--pru);
   border-color: var(--pru);
 }
+
+/* ---------- sharing mode: the customer-facing whiteboard ---------- */
+
+/* "Show customer" sits in the rail's right group; a chip so it reads as a mode switch, not an action. */
+.share-btn {
+  padding: 6px 11px;
+  font-size: 12px;
+}
+
+/* The pared-back rail shown while the iPad faces the customer: product · name, an honest recording
+   indicator, the Web-Speech attribution control when it is the only attribution, and the way back. */
+.share-rail {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  flex-wrap: wrap;
+}
+.share-rec {
+  color: var(--pru);
+}
+.share-back {
+  margin-left: auto;
+  min-height: 40px;
+}
+
+/* The board replaces the prompter in the console's right column. */
+.board {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* The toolbar sits OUTSIDE the ink layer so it stays tappable while drawing is on. */
+.board-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: none;
+}
+.board-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.board-chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--ink-2);
+  font: 400 14px var(--font-sans);
+  cursor: pointer;
+}
+/* In-play concepts read slightly heavier — no colour or word that would encode a ledger state. */
+.board-chip.active {
+  background: var(--brochure-2);
+  border-color: var(--rule-strong);
+  color: var(--ink);
+  font-weight: 600;
+}
+.board-follow {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  font: 400 12.5px var(--font-sans);
+  cursor: default;
+}
+.board-follow.pinned {
+  cursor: pointer;
+  border-color: var(--pru-line);
+  color: var(--pru);
+}
+
+.ink-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.tool-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--ink-2);
+  font: 500 13px var(--font-sans);
+  cursor: pointer;
+}
+.tool-btn.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--card);
+}
+.tool-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.color-row,
+.width-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+/* 32px swatch, 44px hit area. */
+.color-chip {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.color-chip::before {
+  content: "";
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--sw);
+  box-shadow: 0 0 0 1px var(--rule-strong) inset;
+}
+.color-chip.on::before {
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink);
+}
+
+/* Card ≈55%, page ≈45%. The ink layer is absolutely positioned over the body. */
+.board-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+  gap: 16px;
+}
+.board-card {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  padding: 22px 24px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.board-card.idle {
+  justify-content: center;
+}
+.board-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.board-headline {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* A larger sibling of .say — the spoken serif, sized for the customer across the table. */
+.board-say {
+  font-family: var(--font-spoken);
+  font-size: clamp(24px, 2.4vw, 38px);
+  line-height: 1.35;
+  letter-spacing: -0.003em;
+  color: var(--ink);
+}
+.board-idle {
+  font-family: var(--font-spoken);
+  font-size: clamp(20px, 2vw, 28px);
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+.board-excerpt {
+  border-left: 2px solid var(--pru-line);
+  padding-left: 12px;
+}
+.board-excerpt-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pencil);
+  margin-bottom: 4px;
+}
+.board-excerpt p {
+  font-size: 15.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.board-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+.page-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.page-pill {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--ink-2);
+  font: 500 13px var(--font-mono);
+  cursor: pointer;
+}
+.page-pill.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--card);
+}
+.page-arrow {
+  min-height: 40px;
+  min-width: 40px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.page-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.pdf-wrap {
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--card);
+}
+.pdf-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.pdf-hl {
+  background: var(--marker-wash);
+  border-radius: 2px;
+}
+.pdf-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+.pdf-skeleton .pru-skeleton {
+  height: 16px;
+}
+
+.excerpt-card {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.excerpt-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pencil);
+}
+.excerpt-note {
+  font-size: 12px;
+  color: var(--ink-3);
+  font-style: italic;
+}
+.excerpt-text {
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.excerpt-link {
+  font: 500 13px var(--font-sans);
+  color: var(--pru);
+  text-decoration: none;
+}
+.excerpt-link:hover {
+  text-decoration: underline;
+}
+
+/* The drawing surface, over the whole body. pointer-events is toggled inline with the Draw control. */
+.ink {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  width: 100%;
+  height: 100%;
+}
+
+/* Portrait iPad: card over page, and let the body scroll. */
+@media (max-width: 900px) {
+  .board-body {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+}

@@ -188,6 +188,10 @@ export function autoFocus(agent: AgentSlice, prev: BoardSnapshot | null): { focu
 
 const IDLE: BoardState = { focus: { kind: "idle" }, pinned: false, snap: null };
 
+// The board's starting state, held by InPersonConsole so a citation pick can land before the whiteboard
+// mounts.
+export const initialBoardState: BoardState = IDLE;
+
 // The board's state transitions. `pick` pins (the rep chose it explicitly); `follow` unpins and
 // forgets the fingerprint so the next poll re-derives from scratch; `agent` auto-follows unless
 // pinned; `reset` returns to idle when sharing mode is left.

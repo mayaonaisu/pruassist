@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { Elapsed, TranscriptPane, Prompter, ContextChat } from "@/components/ConsolePanes";
 import InPersonConsentCard from "./InPersonConsentCard";
+import { reduceBoard, initialBoardState } from "@/lib/board";
 import { useComprehension } from "@/lib/useComprehension";
 import { useConsent } from "@/lib/useConsent";
 import { usePointers } from "@/lib/usePointers";
@@ -15,6 +17,10 @@ import { transcriptText } from "@/lib/transcript";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
 
 const ZERO_STATS: Stats = { surfaced: 0, used: 0, flags: 0, docs: 0 };
+
+// The customer-facing whiteboard is loaded lazily and client-only, so pdfjs never enters the rep view's
+// chunk or runs on the server.
+const Whiteboard = dynamic(() => import("@/components/board/Whiteboard"), { ssr: false });
 
 type Phase = "consent" | "handback" | "live";
 
@@ -114,6 +120,12 @@ function InPersonConsole({
   const comprehension = useComprehension({ roomId: session.roomId, repName, latest, lines });
   const { agent } = comprehension;
 
+  // Sharing mode: the rep turns the iPad to the customer and the prompter is replaced by the whiteboard.
+  // The board reducer lives here (not inside the whiteboard) so a citation tap can pick a page before the
+  // board mounts. Recording and comprehension polling keep running throughout — nothing here unmounts.
+  const [sharing, setSharing] = useState(false);
+  const [board, boardDispatch] = useReducer(reduceBoard, initialBoardState);
+
   const [startedAt, setStartedAt] = useState(0);
   const startRef = useRef(0);
   const pointersRef = useRef(pointers);
@@ -174,7 +186,8 @@ function InPersonConsole({
 
   return (
     <div className="pru-live">
-      <div className="c-rail">
+      {!sharing ? (
+        <div className="c-rail">
         <span className="rec">
           <span className="pru-rec-dot" />
           REC
@@ -230,20 +243,76 @@ function InPersonConsole({
           >
             {auto ? "Auto-suggest on" : "Auto-suggest off"}
           </button>
+          <button
+            type="button"
+            className="pru-chip share-btn"
+            onClick={() => {
+              unlockAudio(); // keep the AudioContext alive within this user gesture (Safari)
+              setSharing(true);
+            }}
+          >
+            Show customer
+          </button>
           <button className="btn-end" onClick={end} disabled={comprehension.ending}>
             {comprehension.ending ? "Closing the record…" : "End session"}
           </button>
         </span>
-      </div>
+        </div>
+      ) : (
+        <div className="share-rail">
+          <span className="c-ctx">
+            {session.productArea} · <b>{displayName}</b>
+          </span>
+          <span className="rec share-rec">
+            <span className="pru-rec-dot" />
+            Recording
+          </span>
+          {/* In the Web-Speech fallback the manual override is the only attribution, so it stays on the
+              share rail even while the board is up — hiding it would corrupt the record. */}
+          {speech.engine === "browser" && (
+            <div className="turn-seg" role="group" aria-label="Who is speaking now">
+              <button
+                type="button"
+                className={`turn-opt ${speech.override === "rep" ? "on" : ""}`}
+                aria-pressed={speech.override === "rep"}
+                onClick={() => speech.setOverride("rep")}
+              >
+                You
+              </button>
+              <button
+                type="button"
+                className={`turn-opt ${speech.override === "customer" ? "on" : ""}`}
+                aria-pressed={speech.override === "customer"}
+                onClick={() => speech.setOverride("customer")}
+              >
+                {displayName}
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            className="btn-end share-back"
+            onClick={() => {
+              boardDispatch({ type: "reset" });
+              setSharing(false);
+            }}
+          >
+            Back to my view
+          </button>
+        </div>
+      )}
 
-      {banner && (
+      {/* While sharing, the customer sees this rail — keep only the mic-paused honesty note, not the
+          rep-facing attribution/permission hints. */}
+      {banner && (!sharing || speech.micPaused) && (
         <div role="status" className="notice" style={{ flex: "none" }}>
           {banner}
         </div>
       )}
 
       <div className="console">
-        <div className="call-rail">
+        {/* Kept mounted while sharing (ContextChat holds its thread in local state); just hidden. */}
+        <div className="call-rail" hidden={sharing}>
           <TranscriptPane
             lines={lines}
             interim={interim}
@@ -256,7 +325,11 @@ function InPersonConsole({
           <ContextChat clarify={pointers.clarify} onSend={pointers.provideContext} />
         </div>
 
-        <Prompter pointers={pointers} comprehension={comprehension} />
+        {sharing ? (
+          <Whiteboard agent={agent} productArea={session.productArea} state={board} dispatch={boardDispatch} />
+        ) : (
+          <Prompter pointers={pointers} comprehension={comprehension} />
+        )}
       </div>
     </div>
   );
