@@ -14,6 +14,9 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 delete process.env.UPSTASH_REDIS_REST_URL;
 delete process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -26,7 +29,7 @@ delete process.env.ORCHESTRATOR_API_KEY;
 
 const { CONCEPTS, conceptById, conceptsForArea } = await import("../src/lib/concepts.ts");
 const { scorePass } = await import("../src/lib/agent/score.ts");
-const { clauseById } = await import("../src/lib/knowledge.ts");
+const { clauseById, knowledgeDocuments, KNOWLEDGE } = await import("../src/lib/knowledge.ts");
 const { applyActs, applyDetections, buildRecord, chooseAlert, saveState, loadState } = await import("../src/lib/agent/ledger.ts");
 const { getStore } = await import("../src/lib/store.ts");
 const { callWithRetry } = await import("../src/lib/agent/gemini.ts");
@@ -48,6 +51,7 @@ const { decideMode } = await import("../src/lib/agent/orchestrator/modes.ts");
 const { resolveHotkey } = await import("../src/lib/hotkeys.ts");
 const { chunkLines, toClauses, textToLines } = await import("../src/lib/ingest.ts");
 const { addTextSource, listSources, removeSource, customClauses } = await import("../src/lib/custom-kb.ts");
+const { DOCUMENTS, documentFor, locateSource } = await import("../src/lib/documents.ts");
 const { runOrchestrator } = await import("../src/lib/agent/orchestrator/graph.ts");
 const { handleGuider, agenticLiveEnabled } = await import("../src/lib/agent/orchestrator/handlers.ts");
 const { DRIFT_PAUSE_AFTER, RESETS_DRIFT, loadDrift, recordDrift, clearDrift, judgePausedTurn } = await import("../src/lib/agent/orchestrator/drift.ts");
@@ -1242,4 +1246,74 @@ test("applySpeakerSwap: swapping to customer re-derives the question flag; swapp
 test("applySpeakerSwap: swap with an unknown id returns the same array", () => {
   const lines = [{ id: "x", at: 1, speaker: "Bryan", text: "hello there friend", flag: false }];
   assert.strictEqual(applySpeakerSwap(lines, "nope", "Bryan", "Mrs Tan"), lines);
+});
+
+// ---------- sharing mode: document registry + source locator (documents.ts) ----------
+
+test("locateSource: a PRUShield clause source resolves to its committed PDF and pages", () => {
+  const loc = locateSource("PRUShield Product Brochure (Apr 2026) · p.2, p.12, p.17");
+  assert.strictEqual(loc.kind, "pdf");
+  assert.strictEqual(loc.doc, "PRUShield Product Brochure (Apr 2026)");
+  assert.strictEqual(loc.file, "/docs/prushield-apr-2026.pdf");
+  assert.deepStrictEqual(loc.pages, [2, 12, 17]);
+  assert.match(loc.url ?? "", /^https:\/\//);
+});
+
+test("locateSource: a registered doc with no page part yields empty pages", () => {
+  const loc = locateSource("PRUActive Term Brochure");
+  assert.strictEqual(loc.kind, "pdf");
+  assert.strictEqual(loc.file, "/docs/pruactive-term.pdf");
+  assert.deepStrictEqual(loc.pages, []);
+});
+
+test("locateSource: a web-sourced clause is web, with its url and no pages", () => {
+  const loc = locateSource(
+    "PRUShield & PRUExtra (prudential.com.sg) · https://www.prudential.com.sg/products/health-insurance/medical/prushield",
+  );
+  assert.strictEqual(loc.kind, "web");
+  assert.strictEqual(loc.url, "https://www.prudential.com.sg/products/health-insurance/medical/prushield");
+  assert.strictEqual(loc.file, undefined);
+  assert.deepStrictEqual(loc.pages, []);
+});
+
+test("locateSource: an unknown document label is 'unknown' but still parses its pages", () => {
+  const loc = locateSource("Panel rate note (added) · p.4, p.3, p.3");
+  assert.strictEqual(loc.kind, "unknown");
+  assert.strictEqual(loc.file, undefined);
+  assert.deepStrictEqual(loc.pages, [3, 4], "pages are unique and ascending regardless of authored order");
+});
+
+test("locateSource: a string rebuilt by groupCitations round-trips to the same location", () => {
+  const [g] = groupCitations([
+    "PRUShield Product Brochure (Apr 2026) · p.3",
+    "PRUShield Product Brochure (Apr 2026) · p.6, p.10",
+  ]);
+  const rebuilt = `${g.doc}${g.pages ? " · " + g.pages : ""}`;
+  const loc = locateSource(rebuilt);
+  assert.strictEqual(loc.kind, "pdf");
+  assert.strictEqual(loc.doc, "PRUShield Product Brochure (Apr 2026)");
+  assert.deepStrictEqual(loc.pages, [3, 6, 10]);
+});
+
+test("documentFor: resolves a registered doc and is undefined otherwise", () => {
+  assert.strictEqual(documentFor("PRUShield Product Brochure (Apr 2026)")?.file, "/docs/prushield-apr-2026.pdf");
+  assert.strictEqual(documentFor("Nonexistent Brochure"), undefined);
+  assert.strictEqual(DOCUMENTS.length, 5, "the five registered brochures");
+});
+
+test("every cited brochure resolves to a committed PDF that exists on disk (the .gitignore trap)", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  let checked = 0;
+  for (const doc of knowledgeDocuments()) {
+    const source = KNOWLEDGE.find((c) => c.source.split(" · ")[0] === doc)!.source;
+    const loc = locateSource(source);
+    if (loc.kind === "web") continue; // prudential.com.sg pages are linked out, never rendered
+    assert.strictEqual(loc.kind, "pdf", `${doc} is cited but is not a registered PDF`);
+    assert.ok(
+      loc.file && existsSync(join(root, "public", loc.file.replace(/^\//, ""))),
+      `${doc} → ${loc.file} is missing under public/ (did .gitignore drop it on a fresh clone?)`,
+    );
+    checked++;
+  }
+  assert.ok(checked > 0, "at least one brochure PDF is exercised");
 });

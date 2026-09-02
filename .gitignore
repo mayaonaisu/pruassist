@@ -15,6 +15,8 @@ build/
 
 # === Not part of the app: input PDFs, private recordings, local binaries, generated docs ===
 *.pdf
+# ...except the committed brochure PDFs the sharing-mode whiteboard renders.
+!public/docs/*.pdf
 *.mp4
 *.wav
 *.docx
