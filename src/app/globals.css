@@ -58,6 +58,11 @@
   margin: 0;
   padding: 0;
 }
+/* The `hidden` attribute must win over component display rules (e.g. `.call-rail{display:flex}`),
+   so the transcript rail actually collapses and the sharing-mode whiteboard gets the full width. */
+[hidden] {
+  display: none !important;
+}
 html {
   max-width: 100vw;
   overflow-x: hidden;
@@ -2039,58 +2044,58 @@ button {
   background: var(--card);
   border: 1px solid var(--rule);
   border-radius: var(--r-md);
-  padding: 22px 24px;
+  padding: 30px 36px;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 .board-card.idle {
   justify-content: center;
 }
 .board-eyebrow {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
 .board-headline {
   font-family: var(--font-serif);
-  font-size: 28px;
-  line-height: 1.15;
+  font-size: clamp(30px, 3vw, 46px);
+  line-height: 1.12;
   font-weight: 600;
   color: var(--ink);
 }
-/* A larger sibling of .say — the spoken serif, sized for the customer across the table. */
+/* A larger sibling of .say — the spoken serif, sized so the customer reads it across the table. */
 .board-say {
   font-family: var(--font-spoken);
-  font-size: clamp(24px, 2.4vw, 38px);
-  line-height: 1.35;
-  letter-spacing: -0.003em;
+  font-size: clamp(30px, 3.4vw, 54px);
+  line-height: 1.3;
+  letter-spacing: -0.004em;
   color: var(--ink);
 }
 .board-idle {
   font-family: var(--font-spoken);
-  font-size: clamp(20px, 2vw, 28px);
-  line-height: 1.4;
+  font-size: clamp(26px, 2.8vw, 42px);
+  line-height: 1.35;
   color: var(--ink-3);
 }
 .board-excerpt {
-  border-left: 2px solid var(--pru-line);
-  padding-left: 12px;
+  border-left: 3px solid var(--pru-line);
+  padding-left: 15px;
 }
 .board-excerpt-eyebrow {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--pencil);
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 .board-excerpt p {
-  font-size: 15.5px;
-  line-height: 1.5;
+  font-size: clamp(16px, 1.5vw, 21px);
+  line-height: 1.55;
   color: var(--ink-2);
 }
 
