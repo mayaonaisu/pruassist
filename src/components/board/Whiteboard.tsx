@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentView } from "@/lib/useComprehension";
 import { conceptCard, sourceCard, conceptsInPlay, type BoardEvent, type BoardFocus, type BoardState } from "@/lib/board";
 import PdfPage from "./PdfPage";
+import PdfZoom from "./PdfZoom";
 import ExcerptCard from "./ExcerptCard";
 import InkLayer, { type InkHandle, type InkTool } from "./InkLayer";
 
@@ -308,7 +309,9 @@ export default function Whiteboard({ agent, productArea, state, dispatch }: Prop
                       </button>
                     )}
                   </div>
-                  <PdfPage key={`${cur.file}:${cur.page}`} file={cur.file} page={cur.page} highlights={view.highlights} onError={() => setPdfError(true)} />
+                  <PdfZoom resetKey={`${cur.file}:${cur.page}`}>
+                    <PdfPage key={`${cur.file}:${cur.page}`} file={cur.file} page={cur.page} highlights={view.highlights} onError={() => setPdfError(true)} />
+                  </PdfZoom>
                 </>
               ) : (
                 <ExcerptCard
