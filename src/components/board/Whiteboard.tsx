@@ -140,6 +140,33 @@ export default function Whiteboard({ agent, productArea, state, dispatch }: Prop
   const [hist, setHist] = useState({ canUndo: false, canRedo: false });
   const inkRef = useRef<InkHandle>(null);
 
+  // Draggable split between the card and the brochure page (percent given to the card). The value is
+  // fed to both the toolbar grid and the body grid as CSS variables so they stay column-aligned; the
+  // portrait media query ignores the variables and stacks instead.
+  const [split, setSplit] = useState(55);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  const onDividerDown = (e: React.PointerEvent) => {
+    dragging.current = true;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onDividerMove = (e: React.PointerEvent) => {
+    if (!dragging.current || !bodyRef.current) return;
+    const rect = bodyRef.current.getBoundingClientRect();
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    setSplit(Math.max(28, Math.min(72, pct)));
+  };
+  const onDividerUp = (e: React.PointerEvent) => {
+    dragging.current = false;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer already released */
+    }
+  };
+  const splitStyle = { ["--split" as string]: `${split}fr`, ["--page-split" as string]: `${100 - split}fr` } as React.CSSProperties;
+
   const activeColor = tool === "marker" ? markerColor : penColor;
   const setActiveColor = (c: string) => (tool === "marker" ? setMarkerColor(c) : setPenColor(c));
   const pickTool = (t: InkTool) => {
@@ -152,7 +179,8 @@ export default function Whiteboard({ agent, productArea, state, dispatch }: Prop
 
   return (
     <div className="board">
-      <div className="board-tools">
+      <div className="board-head" style={splitStyle}>
+        <div className="board-head-card">
         <div className="board-chips">
           {chips.map((c) => (
             <button
@@ -175,6 +203,9 @@ export default function Whiteboard({ agent, productArea, state, dispatch }: Prop
         >
           {state.pinned ? "Pinned · Follow conversation" : "Following conversation"}
         </button>
+        </div>
+
+        <div className="board-head-gap" aria-hidden />
 
         <div className="ink-tools" role="group" aria-label="Drawing tools">
           <button type="button" className={`tool-btn ${drawOn ? "on" : ""}`} onClick={() => setDrawOn((v) => !v)}>
@@ -221,7 +252,7 @@ export default function Whiteboard({ agent, productArea, state, dispatch }: Prop
         </div>
       </div>
 
-      <div className="board-body">
+      <div className={`board-body ${view.idle ? "idle" : ""}`} ref={bodyRef} style={splitStyle}>
         {view.idle ? (
           <div className="board-card idle">
             <div className="board-eyebrow">{view.product}</div>
@@ -240,6 +271,22 @@ export default function Whiteboard({ agent, productArea, state, dispatch }: Prop
                 </div>
               ))}
             </div>
+
+            <div
+              className="board-divider"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize the card and page"
+              tabIndex={0}
+              onPointerDown={onDividerDown}
+              onPointerMove={onDividerMove}
+              onPointerUp={onDividerUp}
+              onPointerCancel={onDividerUp}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowLeft") setSplit((s) => Math.max(28, s - 3));
+                else if (e.key === "ArrowRight") setSplit((s) => Math.min(72, s + 3));
+              }}
+            />
 
             <div className="board-page">
               {showPdf && cur ? (

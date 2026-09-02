@@ -1928,13 +1928,25 @@ button {
   min-height: 0;
 }
 
-/* The toolbar sits OUTSIDE the ink layer so it stays tappable while drawing is on. */
-.board-tools {
+/* The toolbar sits OUTSIDE the ink layer so it stays tappable while drawing is on. It shares the body's
+   column grid so the concept chips sit above the card and the drawing tools above the brochure page —
+   the drawing tools never spill across into the card half. */
+.board-head {
+  display: grid;
+  grid-template-columns: minmax(0, var(--split, 55fr)) 12px minmax(0, var(--page-split, 45fr));
+  column-gap: 14px;
+  align-items: start;
+  flex: none;
+}
+.board-head-card {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  flex: none;
+  min-width: 0;
+}
+.board-head-gap {
+  min-width: 0;
 }
 .board-chips {
   display: flex;
@@ -1974,12 +1986,13 @@ button {
   color: var(--pru);
 }
 
+/* Confined to its grid cell (above the page) and wraps within it — never overflows into the card. */
 .ink-tools {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  margin-left: auto;
+  min-width: 0;
 }
 .tool-btn {
   min-height: 44px;
@@ -2031,14 +2044,47 @@ button {
   box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink);
 }
 
-/* Card ≈55%, page ≈45%. The ink layer is absolutely positioned over the body. */
+/* Card | draggable divider | page. The split fractions come from the CSS variables the component sets;
+   the ink layer is absolutely positioned over the whole body. */
 .board-body {
   position: relative;
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, var(--split, 55fr)) 12px minmax(0, var(--page-split, 45fr));
+  column-gap: 14px;
+}
+.board-body.idle {
+  grid-template-columns: 1fr;
+}
+
+/* The drag handle between the two panes — a centred grip that reddens and grows on hover/focus. Above
+   the ink layer (z 6 > 5) so it is grabbable even while drawing is on. */
+.board-divider {
+  position: relative;
+  z-index: 6;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+}
+.board-divider::before {
+  content: "";
+  width: 4px;
+  height: 46px;
+  border-radius: var(--r-full);
+  background: var(--rule-strong);
+  transition: background 0.12s ease, height 0.12s ease;
+}
+.board-divider:hover::before,
+.board-divider:focus-visible::before {
+  background: var(--pru);
+  height: 68px;
+}
+.board-divider:focus-visible {
+  outline: none;
 }
 .board-card {
   background: var(--card);
@@ -2232,10 +2278,20 @@ button {
   height: 100%;
 }
 
-/* Portrait iPad: card over page, and let the body scroll. */
+/* Portrait iPad: single column — chips then tools, card over page — and let the body scroll. The split
+   variables are ignored here, and the drag handle is hidden. */
 @media (max-width: 900px) {
+  .board-head,
   .board-body {
     grid-template-columns: 1fr;
+    column-gap: 0;
+  }
+  .board-body {
     overflow: auto;
+    row-gap: 14px;
+  }
+  .board-divider,
+  .board-head-gap {
+    display: none;
   }
 }
