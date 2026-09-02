@@ -2199,6 +2199,25 @@ button {
   text-decoration: underline;
 }
 
+/* A tappable citation on the rep console: same look as the inert citation span, but it turns the board
+   to that page. Online console citations have no onOpen and stay plain spans. */
+.cite-link {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-bottom: 4px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cite-link:hover {
+  color: var(--pru);
+  text-decoration: underline;
+}
+
 /* The drawing surface, over the whole body. pointer-events is toggled inline with the Draw control. */
 .ink {
   position: absolute;

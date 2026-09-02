@@ -174,6 +174,20 @@ function InPersonConsole({
     onEnd(transcriptText(latest()), pointers.stats(), dur, { record, customerName: consent?.name ?? customerName });
   }, [comprehension, consent?.name, customerName, latest, onEnd, pointers]);
 
+  // Tapping a citation under a suggested line turns the board to that page. The reconstructed source
+  // merges the doc's pages; recover a clause id and snippet from the pointer's own sources (matched by
+  // document) so the board can resolve the exact clause, then enter sharing mode.
+  const openSource = useCallback(
+    (source: string) => {
+      const doc = source.split(" · ")[0];
+      const match = pointers.result?.sources.find((s) => s.source.split(" · ")[0] === doc);
+      boardDispatch({ type: "pick", focus: { kind: "source", source, clauseId: match?.id, snippet: match?.snippet } });
+      unlockAudio();
+      setSharing(true);
+    },
+    [pointers.result],
+  );
+
   const displayName = consent?.name || customerName || "Customer";
 
   const banner = speech.micPaused
@@ -328,7 +342,7 @@ function InPersonConsole({
         {sharing ? (
           <Whiteboard agent={agent} productArea={session.productArea} state={board} dispatch={boardDispatch} />
         ) : (
-          <Prompter pointers={pointers} comprehension={comprehension} />
+          <Prompter pointers={pointers} comprehension={comprehension} onOpenSource={openSource} />
         )}
       </div>
     </div>

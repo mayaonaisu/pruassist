@@ -25,16 +25,28 @@ export function Elapsed({ startedAt }: { startedAt: number }) {
 }
 
 // Citations for the line, collapsed to one row per document (pages merged) so the sidebar stops
-// repeating the full brochure name on every page reference.
-function Citations({ sources }: { sources: string[] }) {
+// repeating the full brochure name on every page reference. In-person mode passes `onOpen`: each
+// citation becomes a button that turns the board to that page. The reconstructed string
+// (`<doc> · <pages>`) is a valid locateSource input. Without `onOpen` the markup is unchanged, so the
+// online console renders byte-identically.
+function Citations({ sources, onOpen }: { sources: string[]; onOpen?: (source: string) => void }) {
   return (
     <>
-      {groupCitations(sources).map((g, i) => (
-        <span key={i}>
-          {g.doc}
-          {g.pages ? <span className="cite-pp"> · {g.pages}</span> : null}
-        </span>
-      ))}
+      {groupCitations(sources).map((g, i) => {
+        const label = (
+          <>
+            {g.doc}
+            {g.pages ? <span className="cite-pp"> · {g.pages}</span> : null}
+          </>
+        );
+        if (!onOpen) return <span key={i}>{label}</span>;
+        const source = `${g.doc}${g.pages ? " · " + g.pages : ""}`;
+        return (
+          <button type="button" key={i} className="cite-link" onClick={() => onOpen(source)} title="Show this page to the customer">
+            {label}
+          </button>
+        );
+      })}
     </>
   );
 }
@@ -200,7 +212,16 @@ const ALERT_CAT: Record<string, string> = {
  * line the rep reads mid-conversation, and the backup material. Composed from the pointers and
  * comprehension hooks so both consoles show identical advice.
  */
-export function Prompter({ pointers, comprehension }: { pointers: PointersApi; comprehension: ComprehensionApi }) {
+export function Prompter({
+  pointers,
+  comprehension,
+  onOpenSource,
+}: {
+  pointers: PointersApi;
+  comprehension: ComprehensionApi;
+  // In-person mode only: tapping a citation turns the board to that page. LiveStep passes nothing.
+  onOpenSource?: (source: string) => void;
+}) {
   const { agent } = comprehension;
   const result = pointers.result;
   const support = result
@@ -235,7 +256,7 @@ export function Prompter({ pointers, comprehension }: { pointers: PointersApi; c
             </div>
             <div className="cite">
               <b>Grounded in</b>
-              <Citations sources={agent.alert.citations} />
+              <Citations sources={agent.alert.citations} onOpen={onOpenSource} />
             </div>
           </div>
           <div className="say-actions">
@@ -330,7 +351,7 @@ export function Prompter({ pointers, comprehension }: { pointers: PointersApi; c
               <div className="cite">
                 <b>Grounded in</b>
                 {result.sources.length ? (
-                  <Citations sources={result.sources.map((s) => s.source)} />
+                  <Citations sources={result.sources.map((s) => s.source)} onOpen={onOpenSource} />
                 ) : (
                   <span>no source returned</span>
                 )}
