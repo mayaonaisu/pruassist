@@ -52,6 +52,7 @@ const { resolveHotkey } = await import("../src/lib/hotkeys.ts");
 const { chunkLines, toClauses, textToLines } = await import("../src/lib/ingest.ts");
 const { addTextSource, listSources, removeSource, customClauses } = await import("../src/lib/custom-kb.ts");
 const { DOCUMENTS, documentFor, locateSource } = await import("../src/lib/documents.ts");
+const { reduceBoard, autoFocus, conceptsInPlay, conceptCard, sourceCard, figuresIn } = await import("../src/lib/board.ts");
 const { runOrchestrator } = await import("../src/lib/agent/orchestrator/graph.ts");
 const { handleGuider, agenticLiveEnabled } = await import("../src/lib/agent/orchestrator/handlers.ts");
 const { DRIFT_PAUSE_AFTER, RESETS_DRIFT, loadDrift, recordDrift, clearDrift, judgePausedTurn } = await import("../src/lib/agent/orchestrator/drift.ts");
@@ -1316,4 +1317,154 @@ test("every cited brochure resolves to a committed PDF that exists on disk (the 
     checked++;
   }
   assert.ok(checked > 0, "at least one brochure PDF is exercised");
+});
+
+// ---------- sharing mode: board projections (board.ts) ----------
+
+test("figuresIn: extracts unique S$ figures and ignores counts and years", () => {
+  assert.deepStrictEqual(
+    figuresIn(["The A ward deductible is S$3,500, the C ward S$1,500, and stop-loss caps at S$ 6,000."]),
+    ["S$3,500", "S$1,500", "S$ 6,000"],
+  );
+  // de-duplicated across texts, kept in first-seen order
+  assert.deepStrictEqual(figuresIn(["S$1,500 here", "and S$1,500 again, plus S$2,000"]), ["S$1,500", "S$2,000"]);
+  // a plain count and a year are not policy figures
+  assert.deepStrictEqual(figuresIn(["There are 3 tiers, revised in 2026."]), []);
+});
+
+test("conceptCard: projects only the customer-safe fields, with page locations and figure highlights", () => {
+  const card = conceptCard("deductible-amounts");
+  assert.ok(card);
+  assert.strictEqual(card.label, "Deductible amount");
+  assert.match(card.canonical, /depends on the ward/);
+  // anchored to its clauses, each located to the brochure
+  assert.ok(card.excerpts.length > 0);
+  assert.ok(card.excerpts.every((e) => e.doc === "PRUShield Product Brochure (Apr 2026)"));
+  // the default page is the first page of the first clause; page locations carry the file to render
+  assert.ok(card.pages.length > 0);
+  assert.strictEqual(card.pages[0].file, "/docs/prushield-apr-2026.pdf");
+  // the S$ figures in the clauses become highlights
+  assert.ok(card.highlights.includes("S$1,500"));
+  assert.strictEqual(conceptCard("nope"), null);
+});
+
+test("conceptCard: leaks none of a concept's misconceptions, teach-back or authored arrays", () => {
+  for (const c of CONCEPTS) {
+    const card = conceptCard(c.id);
+    if (!card) continue;
+    const json = JSON.stringify(card);
+    // no authored field leaks by key — guards against a future `{ ...concept }` spread
+    for (const key of ['"misconceptions"', '"teachBack"', '"terms"', '"qualifiers"']) {
+      assert.ok(!json.includes(key), `${c.id} card leaked the ${key} field`);
+    }
+    // no wrong-framing sentence and no teach-back question leaks by content
+    for (const m of c.misconceptions) assert.ok(!json.includes(m), `${c.id} card leaked a misconception`);
+    assert.ok(!json.includes(c.teachBack), `${c.id} card leaked its teach-back`);
+  }
+});
+
+test("sourceCard: resolves the excerpt by clause id, then page intersection, then snippet-only", () => {
+  // 1. an explicit clause id wins
+  const byId = sourceCard({ kind: "source", source: "PRUShield Product Brochure (Apr 2026) · p.17", clauseId: "deductible-amounts", snippet: "ignored" });
+  assert.strictEqual(byId.kind, "pdf");
+  assert.strictEqual(byId.file, "/docs/prushield-apr-2026.pdf");
+  assert.strictEqual(byId.excerpts[0].clauseId, "deductible-amounts");
+  assert.match(byId.excerpts[0].text, /S\$1,500/);
+
+  // 2. no id: fall back to KNOWLEDGE clauses on the same document whose pages intersect
+  const byPage = sourceCard({ kind: "source", source: "PRUShield Product Brochure (Apr 2026) · p.17" });
+  assert.ok(byPage.excerpts.length > 0);
+  assert.ok(byPage.excerpts.every((e) => e.clauseId && clauseById(e.clauseId)!.source.includes("p.17")));
+
+  // 3. neither an id nor a page match: the snippet is all we have
+  const bySnippet = sourceCard({ kind: "source", source: "Rate note (added) · p.99", snippet: "a pasted custom fact about panel pricing" });
+  assert.strictEqual(bySnippet.kind, "unknown");
+  assert.strictEqual(bySnippet.excerpts.length, 1);
+  assert.strictEqual(bySnippet.excerpts[0].text, "a pasted custom fact about panel pricing");
+  assert.strictEqual(bySnippet.excerpts[0].clauseId, undefined);
+});
+
+// ---------- sharing mode: board focus machine (board.ts) ----------
+
+type Alert_ = import("../src/lib/agent/types.ts").Alert;
+type RecordRow_ = import("../src/lib/agent/types.ts").RecordRow;
+type Readiness_ = import("../src/lib/agent/readiness.ts").Readiness;
+type AgentSlice_ = import("../src/lib/board.ts").AgentSlice;
+type BoardSnapshot_ = import("../src/lib/board.ts").BoardSnapshot;
+type BoardState_ = import("../src/lib/board.ts").BoardState;
+
+const bAlert = (conceptId: string, at: number): Alert_ =>
+  ({ kind: "false-assent", conceptId, label: conceptId, headline: "", detail: "", teachBack: "", citations: [], quote: "", at });
+const bRow = (conceptId: string, state: RecordRow_["state"], at: number): RecordRow_ =>
+  ({ conceptId, label: conceptId, state, at, quote: "", citations: [], risk: "" });
+const bReadiness = (nextConceptId: string, state: RecordRow_["state"]): Readiness_ =>
+  ({ decisionId: "d", question: "", options: [], standing: [{ conceptId: nextConceptId, label: nextConceptId, state, role: "differentiator", citations: [], teachBack: "" }], settled: 0, total: 1, blocking: [], open: [], ready: false, nextQuestion: null, nextConceptId });
+const bAgent = (over: Partial<AgentSlice_>): AgentSlice_ => ({ alert: null, record: [], readiness: null, ...over });
+
+test("board.autoFocus: a new alert beats a changed row", () => {
+  const prev: BoardSnapshot_ = { alertAt: 1000, rows: { "co-insurance": { state: "raised", at: 500 } } };
+  const agent = bAgent({ alert: bAlert("panel-providers", 2000), record: [bRow("co-insurance", "asserted", 1500)] });
+  assert.deepStrictEqual(autoFocus(agent, prev).focus, { kind: "concept", conceptId: "panel-providers" });
+});
+
+test("board.autoFocus: a changed row beats readiness.nextConceptId", () => {
+  const prev: BoardSnapshot_ = { alertAt: 0, rows: { "co-insurance": { state: "raised", at: 500 } } };
+  const agent = bAgent({ record: [bRow("co-insurance", "asserted", 1500)], readiness: bReadiness("deductible-amounts", "asserted") });
+  assert.deepStrictEqual(autoFocus(agent, prev).focus, { kind: "concept", conceptId: "co-insurance" });
+});
+
+test("board.autoFocus: an unchanged poll keeps focus (null) and refreshes the snapshot", () => {
+  const agent = bAgent({ alert: bAlert("panel-providers", 2000), record: [bRow("co-insurance", "asserted", 1500)] });
+  const first = autoFocus(agent, null);
+  const again = autoFocus(agent, first.snap);
+  assert.strictEqual(again.focus, null);
+  assert.deepStrictEqual(again.snap, first.snap);
+});
+
+test("board.autoFocus: the first snapshot seeds from readiness.nextConceptId only", () => {
+  // A changed row would win by rule 2, but rule 2 needs a previous poll — the first snapshot uses
+  // rule 3 (nextConceptId) alone, so entering sharing mode lands on the concept worth asking about.
+  const agent = bAgent({ record: [bRow("deductible-amounts", "asserted", 1500)], readiness: bReadiness("deductible-amounts", "asserted") });
+  const { focus, snap } = autoFocus(agent, null);
+  assert.deepStrictEqual(focus, { kind: "concept", conceptId: "deductible-amounts" });
+  assert.strictEqual(snap.rows["deductible-amounts"].state, "asserted");
+});
+
+test("board.reduceBoard: pick pins the focus and a later agent poll does not move it", () => {
+  const start: BoardState_ = { focus: { kind: "idle" }, pinned: false, snap: null };
+  const picked = reduceBoard(start, { type: "pick", focus: { kind: "source", source: "PRUShield Product Brochure (Apr 2026) · p.17", clauseId: "deductible-amounts" } });
+  assert.strictEqual(picked.pinned, true);
+  assert.strictEqual(picked.focus.kind, "source");
+  const agent = bAgent({ alert: bAlert("panel-providers", 5000), record: [bRow("panel-providers", "misunderstood", 5000)] });
+  const after = reduceBoard(picked, { type: "agent", agent });
+  assert.deepStrictEqual(after.focus, picked.focus, "a pinned board ignores the poll");
+  assert.strictEqual(after.pinned, true);
+});
+
+test("board.reduceBoard: follow unpins, empties the snapshot, and the next poll re-derives", () => {
+  const pinned: BoardState_ = { focus: { kind: "source", source: "x" }, pinned: true, snap: { alertAt: 9, rows: {} } };
+  const followed = reduceBoard(pinned, { type: "follow" });
+  assert.strictEqual(followed.pinned, false);
+  assert.strictEqual(followed.snap, null, "the snapshot is emptied so the next poll re-derives from scratch");
+  const agent = bAgent({ readiness: bReadiness("deductible-amounts", "asserted") });
+  const moved = reduceBoard(followed, { type: "agent", agent });
+  assert.deepStrictEqual(moved.focus, { kind: "concept", conceptId: "deductible-amounts" });
+});
+
+test("board.reduceBoard: reset returns to idle and unpinned", () => {
+  const s: BoardState_ = { focus: { kind: "concept", conceptId: "x" }, pinned: true, snap: { alertAt: 1, rows: {} } };
+  assert.deepStrictEqual(reduceBoard(s, { type: "reset" }), { focus: { kind: "idle" }, pinned: false, snap: null });
+});
+
+test("board.conceptsInPlay: lists touched concepts and flags the active one, never an unseen concept", () => {
+  const agent = bAgent({
+    alert: bAlert("panel-providers", 3000),
+    record: [bRow("deductible-definition", "raised", 1000), bRow("panel-providers", "misunderstood", 3000), bRow("stop-loss", "unseen", 0)],
+  });
+  const chips = conceptsInPlay(agent, "Health Protection");
+  const ids = chips.map((c) => c.conceptId);
+  assert.ok(ids.includes("deductible-definition") && ids.includes("panel-providers"));
+  assert.ok(!ids.includes("stop-loss"), "an unseen concept is not in play");
+  assert.strictEqual(chips.find((c) => c.conceptId === "panel-providers")!.active, true, "the alert concept is active");
+  assert.strictEqual(chips.find((c) => c.conceptId === "deductible-definition")!.active, false);
 });
