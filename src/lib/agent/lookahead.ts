@@ -182,7 +182,7 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
     label: target.label,
     question,
     pointers: rest,
-    sources: clauses.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) })),
+    sources: clauses.map((h) => ({ id: h.id, source: h.source, snippet: h.text.slice(0, 150) })),
     citations: citationsFor(target),
     // Records how the evidence was gathered — the tools the loop called, or a marker that it
     // returned without searching and the clauses came from the retrieval fallback.

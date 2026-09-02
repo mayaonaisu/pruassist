@@ -17,7 +17,7 @@ import type { OrchestratorInput, OrchestratorResult, Pointers } from "./types";
 // console renders without a model call.
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
-const sourcesOf = (hits: Hit[]) => hits.map((h) => ({ source: h.source, snippet: h.text.slice(0, 150) }));
+const sourcesOf = (hits: Hit[]) => hits.map((h) => ({ id: h.id, source: h.source, snippet: h.text.slice(0, 150) }));
 
 const NO_CLAUSE_NOTE = "No policy clause covers this yet — keep listening, or ask the customer to be more specific.";
 const RATE_LIMIT_NOTE = "The AI service is rate limited right now — try again in a moment.";

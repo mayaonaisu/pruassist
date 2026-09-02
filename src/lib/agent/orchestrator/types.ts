@@ -40,7 +40,9 @@ export type Pointers = {
   followUp: string;
 };
 
-export type Source = { source: string; snippet: string };
+// `id` is the clause id (Clause.id), carried so the sharing-mode board can resolve a cited snippet
+// back to its full clause and page.
+export type Source = { id: string; source: string; snippet: string };
 
 // What a node hands back. One shape with optional fields so the route can map it uniformly:
 // generating modes fill `pointers`/`sources`/`unsupportedFigures`; the lighter modes fill `note`,

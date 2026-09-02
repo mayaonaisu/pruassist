@@ -18,7 +18,8 @@ const TRIGGER_DELAY_MS = 1400;
 // Skip ultra-short acks client-side; the server's wake-gate handles the rest cheaply.
 const MIN_WORDS = 3;
 
-type Src = { source: string; snippet: string };
+// `id` is the clause id; optional because lookahead answers cached before Source.id shipped lack it.
+type Src = { id?: string; source: string; snippet: string };
 
 export type Pointers = {
   concern: string;

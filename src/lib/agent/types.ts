@@ -76,7 +76,10 @@ export type Pointers = {
   followUp: string;
 };
 
-export type Source = { source: string; snippet: string };
+// `id` is the clause id (Clause.id), carried so the sharing-mode board can resolve a cited snippet
+// back to its full clause and page. Lookahead answers cached in Redis before this field shipped have
+// no id on the wire; the client type keeps it optional and falls back to a page-intersection match.
+export type Source = { id: string; source: string; snippet: string };
 
 // A pre-computed, grounding-verified answer to the question this customer is most likely to ask
 // next. Served instantly on a match, which is a real latency win rather than a gesture.
