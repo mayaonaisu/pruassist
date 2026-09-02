@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Static assets, incl. the large minified pdfjs runtime (wasm fallbacks) copied into public/.
+    "public/**",
   ]),
 ]);
 

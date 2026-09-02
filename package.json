@@ -27,6 +27,7 @@
     "livekit-client": "^2.20.0",
     "livekit-server-sdk": "^2.15.5",
     "next": "16.2.9",
+    "pdfjs-dist": "^6.3.289",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
