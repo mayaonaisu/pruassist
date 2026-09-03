@@ -87,6 +87,12 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
   if (state.lookahead?.conceptId === target.id && state.lookahead.rev === state.rev) return state.lookahead;
 
   // Phase 1: tools on, free-form. The model decides what to look up.
+  //
+  // Bounded to 2 steps at low thinking. On Vercel the deep pass runs inside `after()` under a 60s
+  // function limit, and the full 3-step MEDIUM-thinking loop routinely blew past it and was killed —
+  // so the prepared answer never landed. Two steps (read the ledger, search once) is what this gather
+  // actually needs, and the retrieval fallback below guarantees a grounded answer even if the leaner
+  // loop searches less, so the latency cut costs reliability nothing.
   const gathered = await runToolLoop(
     `${POSTURE} You are preparing, in the background, for the question this customer is most likely ` +
       `to ask next. ${HOUSE_RULES} Read the ledger to see what they have agreed to without ` +
@@ -99,6 +105,7 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
       `Work out the one question this customer is most likely to ask next about it, and gather the ` +
       `clauses that answer it.`,
     { state, productArea: state.productArea },
+    { maxSteps: 2, think: "off" },
   );
   if (!gathered) return null;
 
