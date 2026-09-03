@@ -43,7 +43,9 @@ const { detectAssent, detectDivergence, detectLatency, detectRaised, detectReAsk
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
 const { lastFromCustomer, newestAt, toTurns, windowToSend, applyLineEdit, applySpeakerSwap, groupCitations } = await import("../src/lib/transcript.ts");
-const { splitRuns, emptySpeakerMap, attributeFinal, interimRole } = await import("../src/lib/diarize.ts");
+const { splitRuns, emptySpeakerMap, attributeFinal, interimRole, noteProvisional, relabelPlan } = await import("../src/lib/diarize.ts");
+const { textCue } = await import("../src/lib/speaker-cues.ts");
+const { pushSample, scoreBetween, recentVerdict } = await import("../src/lib/voice-ring.ts");
 const { createResampler, floatTo16BitPCM } = await import("../src/lib/pcm.ts");
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
@@ -1136,6 +1138,27 @@ test("kb: removeSource drops it from the shared list", async () => {
 const word = (w: string, speaker: number | undefined, punct?: string) =>
   ({ word: w, speaker, start: 0, end: 0, ...(punct !== undefined ? { punctuated_word: punct } : {}) });
 
+// A run with explicit word times, for evidence windows keyed on [start, end].
+const run = (speakerIndex: number, text: string, start = 0, end = 0) => ({ speakerIndex, text, start, end });
+
+const emptyStats = () => ({ voiceSum: 0, voiceN: 0, textRep: 0, textCust: 0, runs: 0 });
+// A firmly-bound SpeakerMap for tests that start mid-session (post-calibration), replacing the old
+// `{ assigned, calibrated }` literals now that the map carries `firm` and `stats` too.
+const bindMap = (roles: Record<number, "rep" | "customer">) => {
+  const assigned: Record<number, "rep" | "customer"> = {};
+  const firm: Record<number, boolean> = {};
+  const stats: Record<number, ReturnType<typeof emptyStats>> = {};
+  let hasRep = false;
+  for (const k of Object.keys(roles)) {
+    const j = Number(k);
+    assigned[j] = roles[j];
+    firm[j] = true;
+    stats[j] = emptyStats();
+    if (roles[j] === "rep") hasRep = true;
+  }
+  return { assigned, firm, stats, calibrated: hasRep };
+};
+
 test("splitRuns: splits a diarized final into one line-run per consecutive speaker", () => {
   const runs = splitRuns([word("a", 0), word("b", 0), word("c", 1), word("d", 1), word("e", 0)]);
   assert.strictEqual(runs.length, 3);
@@ -1162,14 +1185,15 @@ test("splitRuns: prefers punctuated_word over word", () => {
   assert.strictEqual(runs[0].text, "Hello, there.");
 });
 
-test("attributeFinal: the first speaker index binds to the rep (consent-script calibration)", () => {
+test("attributeFinal: first index binds to rep only when no evidence exists (rep-first default)", () => {
   const r = attributeFinal(emptySpeakerMap(), splitRuns([word("welcome", 0)]), null);
   assert.strictEqual(r.lines[0].role, "rep");
+  assert.strictEqual(r.lines[0].provisional, true); // now provisional, not a hard calibration anchor
   assert.strictEqual(r.map.assigned[0], "rep");
   assert.strictEqual(r.lastRole, "rep");
 });
 
-test("attributeFinal: the first differing index binds to the customer", () => {
+test("attributeFinal: with no evidence the first differing index binds to the customer", () => {
   const a = attributeFinal(emptySpeakerMap(), splitRuns([word("hi", 0)]), null);
   const b = attributeFinal(a.map, splitRuns([word("yes", 1)]), null);
   assert.strictEqual(b.lines[0].role, "customer");
@@ -1177,33 +1201,168 @@ test("attributeFinal: the first differing index binds to the customer", () => {
 });
 
 test("attributeFinal: an unseen third index defaults to customer", () => {
-  const map = { assigned: { 0: "rep" as const, 1: "customer" as const }, calibrated: true };
-  const r = attributeFinal(map, splitRuns([word("mm", 2)]), null);
+  const r = attributeFinal(bindMap({ 0: "rep", 1: "customer" }), splitRuns([word("mm", 2)]), null);
   assert.strictEqual(r.lines[0].role, "customer");
   assert.strictEqual(r.map.assigned[2], "customer");
 });
 
+test("attributeFinal: a rep-like voice on the second index binds rep and rebinds the earlier default", () => {
+  // idx 0 speaks first with no evidence → provisional rep. idx 1 then scores clearly rep-like.
+  const a = attributeFinal(emptySpeakerMap(), [run(0, "hello", 0, 2)], null, () => ({ voice: null, text: null }));
+  assert.strictEqual(a.lines[0].role, "rep");
+  assert.strictEqual(a.lines[0].provisional, true);
+  const b = attributeFinal(a.map, [run(1, "the deductible is", 2, 5)], null, () => ({ voice: { mean: 0.8, n: 2 } }));
+  assert.strictEqual(b.lines[0].role, "rep");
+  assert.strictEqual(b.lines[0].provisional, false); // firm (voice)
+  assert.strictEqual(b.map.assigned[1], "rep");
+  assert.strictEqual(b.map.assigned[0], "customer"); // the earlier provisional rep is demoted
+  assert.deepStrictEqual(b.rebound, [{ speakerIndex: 0, from: "rep", to: "customer" }]);
+});
+
+test("attributeFinal: a customer-like first voice binds customer; the next unseen index defaults to rep", () => {
+  const a = attributeFinal(emptySpeakerMap(), [run(0, "so I pay first?", 0, 2)], null, () => ({ voice: { mean: 0.1, n: 2 } }));
+  assert.strictEqual(a.lines[0].role, "customer");
+  assert.strictEqual(a.map.assigned[0], "customer");
+  assert.strictEqual(a.map.firm[0], true);
+  const b = attributeFinal(a.map, [run(1, "right", 2, 3)], null, () => ({ voice: null }));
+  assert.strictEqual(b.lines[0].role, "rep"); // no rep bound yet → rep-first default
+});
+
+test("attributeFinal: voice below voiceMinN falls through to text cues", () => {
+  // n=1 < voiceMinN(2): no voice verdict. A customer text margin then binds provisionally to customer —
+  // a first index with no evidence would have defaulted to REP, so this proves text decided it.
+  const r = attributeFinal(emptySpeakerMap(), [run(0, "x", 0, 1)], null,
+    () => ({ voice: { mean: 0.9, n: 1 }, text: { repVotes: 0, customerVotes: 2 } }));
+  assert.strictEqual(r.lines[0].role, "customer");
+  assert.strictEqual(r.lines[0].provisional, true);
+  assert.strictEqual(r.map.firm[0], false);
+});
+
+test("attributeFinal: a text margin below textMargin does not bind (stays rep-first default)", () => {
+  const r = attributeFinal(emptySpeakerMap(), [run(0, "x")], null, () => ({ voice: null, text: { repVotes: 0, customerVotes: 1 } }));
+  assert.strictEqual(r.lines[0].role, "rep"); // margin 1 < 2 → no text verdict → default
+});
+
+test("attributeFinal: one contrary voice window never flips a firm binding; a sustained run does", () => {
+  // Firmly bind idx 0 to rep (two strong rep windows: mean 0.9, n 2 → cumulative mean 0.9).
+  const m = attributeFinal(emptySpeakerMap(), [run(0, "a", 0, 3)], null, () => ({ voice: { mean: 0.9, n: 2 } })).map;
+  assert.strictEqual(m.assigned[0], "rep");
+  assert.strictEqual(m.firm[0], true);
+  // A contrary window pulls the cumulative mean below voiceLo, but voiceN (3) < flipMinN (4): stays rep.
+  const one = attributeFinal(m, [run(0, "b", 3, 4)], null, () => ({ voice: { mean: -1, n: 1 } }));
+  assert.strictEqual(one.lines[0].role, "rep");
+  assert.deepStrictEqual(one.rebound, []);
+  // Another contrary window: voiceN reaches 4 with a decisively low mean → the firm binding flips.
+  const flip = attributeFinal(one.map, [run(0, "c", 4, 5)], null, () => ({ voice: { mean: -1, n: 1 } }));
+  assert.strictEqual(flip.lines[0].role, "customer");
+  assert.strictEqual(flip.map.assigned[0], "customer");
+  assert.deepStrictEqual(flip.rebound, [{ speakerIndex: 0, from: "rep", to: "customer" }]);
+});
+
 test("attributeFinal: override forces the role and rebinds a single-run final's index", () => {
-  const map = { assigned: { 0: "rep" as const }, calibrated: true };
-  const forced = attributeFinal(map, splitRuns([word("actually", 0)]), "customer");
+  const forced = attributeFinal(bindMap({ 0: "rep" }), splitRuns([word("actually", 0)]), "customer");
   assert.strictEqual(forced.lines[0].role, "customer");
   assert.strictEqual(forced.map.assigned[0], "customer"); // rebound
+  assert.strictEqual(forced.map.firm[0], true);
   // and the next auto final on that index now reads customer (relabel recovery)
   const next = attributeFinal(forced.map, splitRuns([word("right", 0)]), null);
   assert.strictEqual(next.lines[0].role, "customer");
 });
 
 test("attributeFinal: override on a multi-run final forces roles but does not rebind", () => {
-  const map = { assigned: { 0: "rep" as const, 1: "customer" as const }, calibrated: true };
-  const r = attributeFinal(map, splitRuns([word("a", 0), word("b", 1)]), "customer");
+  const r = attributeFinal(bindMap({ 0: "rep", 1: "customer" }), splitRuns([word("a", 0), word("b", 1)]), "customer");
   assert.deepStrictEqual(r.lines.map((l) => l.role), ["customer", "customer"]);
   assert.deepStrictEqual(r.map.assigned, { 0: "rep", 1: "customer" }); // unchanged
+  assert.deepStrictEqual(r.rebound, []);
 });
 
-test("interimRole: goes to the override, else the last final's role, else the rep", () => {
+test("interimRole: override, else live voice, else last final, else rep", () => {
   assert.strictEqual(interimRole("customer", "rep"), "customer");
   assert.strictEqual(interimRole(null, "customer"), "customer");
   assert.strictEqual(interimRole(null, null), "rep");
+  assert.strictEqual(interimRole(null, "rep", "customer"), "customer"); // live voice beats the last final
+  assert.strictEqual(interimRole("rep", "customer", "customer"), "rep"); // override still wins
+  assert.strictEqual(interimRole(null, "customer", null), "customer"); // no live verdict → last final
+});
+
+test("textCue: a customer question votes customer", () => {
+  const c = textCue("So do I have to pay the first part of every bill myself?");
+  assert.ok(c.customerVotes > c.repVotes);
+});
+
+test("textCue: an explanatory product sentence votes rep", () => {
+  const c = textCue("The deductible is the amount you pay each policy year before we start to pay.");
+  assert.ok(c.repVotes > c.customerVotes);
+});
+
+test("textCue: a rep check-in question does not count as a customer question", () => {
+  const c = textCue("Does that make sense?");
+  assert.ok(c.repVotes >= 1);
+  assert.strictEqual(c.customerVotes, 0);
+});
+
+test("textCue: bare assent votes customer", () => {
+  const c = textCue("okay yeah");
+  assert.ok(c.customerVotes >= 1);
+  assert.strictEqual(c.repVotes, 0);
+});
+
+test("textCue: addressing the other person by first name nudges the right way", () => {
+  const toCustomer = textCue("Thanks for that, Sarah.", { customerName: "Sarah Tan" });
+  assert.ok(toCustomer.repVotes >= 1);
+  const toRep = textCue("Wait John, what does that mean for me?", { repName: "John Lee" });
+  assert.ok(toRep.customerVotes >= 1);
+});
+
+test("voice-ring: scoreBetween overlap-weights and isolates by epoch", () => {
+  const ring = [
+    { epoch: 1, t0: 0, t1: 3, score: 0.8 },
+    { epoch: 1, t0: 3, t1: 6, score: 0.2 },
+    { epoch: 2, t0: 0, t1: 3, score: 1.0 },
+  ];
+  const ev = scoreBetween(ring, 1, 2, 4); // [2,3] of the 0.8 window, [3,4] of the 0.2 window
+  assert.ok(ev);
+  assert.strictEqual(ev!.n, 2);
+  assert.ok(Math.abs(ev!.mean - 0.5) < 1e-9); // (0.8*1 + 0.2*1) / 2
+  // epoch 2's sample also spans [2,4] but is ignored when querying epoch 1.
+  assert.strictEqual(scoreBetween(ring, 1, 0, 100)!.n, 2);
+  assert.strictEqual(scoreBetween(ring, 9, 0, 100), null);
+});
+
+test("voice-ring: pushSample drops older epochs and stale samples", () => {
+  let ring = pushSample([], { epoch: 1, t0: 0, t1: 3, score: 0.9 });
+  ring = pushSample(ring, { epoch: 2, t0: 0, t1: 3, score: 0.1 }); // reconnect → epoch 1 dropped
+  assert.ok(ring.every((s) => s.epoch === 2));
+  ring = pushSample(ring, { epoch: 2, t0: 200, t1: 203, score: 0.5 }, 120); // 200 s later
+  assert.ok(ring.every((s) => s.t1 >= 200)); // the t1=3 sample is >120 s behind → pruned
+});
+
+test("voice-ring: recentVerdict reads only the latest window and respects staleness", () => {
+  const ring = [
+    { epoch: 1, t0: 0, t1: 3, score: 0.2 },
+    { epoch: 1, t0: 3, t1: 6, score: 0.9 },
+  ];
+  assert.strictEqual(recentVerdict(ring, 1, 6.5, 0.5, 0.3), "rep"); // latest (0.9) is rep-like and fresh
+  assert.strictEqual(recentVerdict(ring, 1, 20, 0.5, 0.3), null); // latest ended 14 s ago → stale
+  assert.strictEqual(recentVerdict(ring, 2, 6.5, 0.5, 0.3), null); // wrong epoch
+});
+
+test("provisional book: relabelPlan swaps rebound ids and keeps untouched indices", () => {
+  let book = noteProvisional({}, 0, "line-a", 1000);
+  book = noteProvisional(book, 0, "line-b", 2000);
+  book = noteProvisional(book, 1, "line-c", 2000);
+  const plan = relabelPlan(book, [{ speakerIndex: 0, from: "rep", to: "customer" }], 2500);
+  assert.deepStrictEqual(plan.swapIds.sort(), ["line-a", "line-b"]);
+  assert.ok(!(0 in plan.book)); // consumed
+  assert.deepStrictEqual(plan.book[1].map((e) => e.id), ["line-c"]); // untouched index kept
+});
+
+test("provisional book: entries older than the window are pruned", () => {
+  let book = noteProvisional({}, 0, "old", 0);
+  book = noteProvisional(book, 0, "new", 70000); // 70 s later, > RELABEL_WINDOW_MS (60 s)
+  assert.deepStrictEqual(book[0].map((e) => e.id), ["new"]); // "old" pruned on the second note
+  const plan = relabelPlan(book, [], 200000); // no rebinds; the stale "new" is pruned too
+  assert.ok(!(0 in plan.book));
 });
 
 test("pcm: 48k->16k output length is one third and a constant signal stays constant", () => {
