@@ -33,6 +33,24 @@ const SCHEMA = {
   required: ["question", "concern", "firstStep", "suggestedLine", "explainer", "comparison", "followUp"],
 };
 
+// OpenAI structured-output schema (strict) — the same seven fields, all required, so the OpenAI
+// synthesis can never come back with an empty "question" the way plain json_object mode can (which
+// would drop the whole prepared answer).
+const OPENAI_SYNTH_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    question: { type: "string" },
+    concern: { type: "string" },
+    firstStep: { type: "string" },
+    suggestedLine: { type: "string" },
+    explainer: { type: "string" },
+    comparison: { type: "string" },
+    followUp: { type: "string" },
+  },
+  required: ["question", "concern", "firstStep", "suggestedLine", "explainer", "comparison", "followUp"],
+};
+
 /** Risk order: wrong beats agreed-but-unshown beats material-and-never-raised. */
 export function rankByRisk(state: AgentState): Concept[] {
   // A concept standing between the representative and a recommendation is worth preparing for
@@ -137,7 +155,7 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
     `RECENT CONVERSATION:\n${recent || "(nothing yet)"}`;
   // OpenAI when configured, Gemini as the fallback — same JSON shape (formatting only; phase 1 did
   // the reasoning).
-  let raw: string | null = openaiEnabled() ? await openaiJson(synthSystem, synthUser, JSON_BUDGET * 2) : null;
+  let raw: string | null = openaiEnabled() ? await openaiJson(synthSystem, synthUser, JSON_BUDGET * 2, OPENAI_SYNTH_SCHEMA) : null;
   if (raw === null) {
     const res = await callWithRetry("lookahead", (ai) =>
       ai.models.generateContent({

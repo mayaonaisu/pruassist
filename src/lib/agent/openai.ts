@@ -23,9 +23,16 @@ type Msg = { role: string; content?: string | null; tool_calls?: ToolCall[]; too
 
 // One call to OpenAI chat. Returns the assistant message, or null on any failure (missing key, HTTP
 // error, timeout) so the caller can fall back to Gemini rather than surface an error.
-async function openaiChat(messages: Msg[], opts: { tools?: unknown[]; json?: boolean; maxTokens?: number } = {}): Promise<Msg | null> {
+async function openaiChat(messages: Msg[], opts: { tools?: unknown[]; json?: boolean; schema?: Record<string, unknown>; maxTokens?: number } = {}): Promise<Msg | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
+  // A schema pins the exact fields (structured outputs, strict) — required when a field like the
+  // lookahead's "question" must never come back empty; plain json_object otherwise.
+  const responseFormat = opts.schema
+    ? { response_format: { type: "json_schema", json_schema: { name: "result", strict: true, schema: opts.schema } } }
+    : opts.json
+      ? { response_format: { type: "json_object" } }
+      : {};
   try {
     const res = await fetch(OPENAI_URL, {
       method: "POST",
@@ -36,7 +43,7 @@ async function openaiChat(messages: Msg[], opts: { tools?: unknown[]; json?: boo
         temperature: 0.3,
         max_tokens: opts.maxTokens ?? 1400,
         ...(opts.tools ? { tools: opts.tools, tool_choice: "auto" } : {}),
-        ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+        ...responseFormat,
       }),
       signal: AbortSignal.timeout(25_000),
     });
@@ -52,13 +59,13 @@ async function openaiChat(messages: Msg[], opts: { tools?: unknown[]; json?: boo
 // Structured JSON synthesis: a system instruction plus user content in, the raw JSON string out (or
 // null on any failure, so the caller falls back to Gemini). response_format pins JSON, exactly as the
 // Gemini callers pin responseMimeType: "application/json".
-export async function openaiJson(system: string, user: string, maxTokens = 1400): Promise<string | null> {
+export async function openaiJson(system: string, user: string, maxTokens = 1400, schema?: Record<string, unknown>): Promise<string | null> {
   const msg = await openaiChat(
     [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { json: true, maxTokens },
+    { json: true, schema, maxTokens },
   );
   return msg?.content ?? null;
 }
