@@ -48,7 +48,8 @@ const { textCue } = await import("../src/lib/speaker-cues.ts");
 const { pushSample, scoreBetween, recentVerdict } = await import("../src/lib/voice-ring.ts");
 // Voice feature/window maths are pure and safe to import here; engine.ts (onnxruntime-web) is NOT.
 const { melSpectrogram, logMelFrame, melCentersHz, N_MELS } = await import("../src/lib/voice/features.ts");
-const { fitWindow, cosine, meanEmbedding, WINDOW_SAMPLES, RingBuffer } = await import("../src/lib/voice/window.ts");
+const { fitWindow, tileWindow, cosine, meanEmbedding, WINDOW_SAMPLES, RingBuffer } = await import("../src/lib/voice/window.ts");
+const { voicedFrames, voicedSeconds } = await import("../src/lib/voice/vad.ts");
 const { bytesToBase64, base64ToBytes } = await import("../src/lib/base64.ts");
 const { encodeProfile, decodeProfile, PROFILE_DIMS } = await import("../src/lib/voice/profile-codec.ts");
 const { saveVoiceProfile, loadVoiceProfile, deleteVoiceProfile, MAX_PROFILE_BYTES } = await import("../src/lib/voice-profile.ts");
@@ -1433,6 +1434,31 @@ test("window: fitWindow pads short and truncates long to exactly WINDOW_SAMPLES"
   assert.strictEqual(padded[3], 0); // tail zero-padded
 });
 
+test("vad: keeps a tone, drops silence, and reports the retained duration", () => {
+  const pcm = new Float32Array(16000);
+  for (let i = 5600; i < 10400; i++) pcm[i] = Math.sin((2 * Math.PI * 440 * i) / 16000) * 0.2;
+  const voiced = voicedFrames(pcm);
+  assert.ok(Math.abs(voiced.length - 0.3 * 16000) <= 320); // boundary frames may each contain tone
+  assert.ok(Math.abs(voicedSeconds(pcm) - voiced.length / 16000) < 1e-9);
+  assert.strictEqual(voicedFrames(new Float32Array(16000)).length, 0);
+});
+
+test("vad: keeps quiet-but-voiced audio at the default floor", () => {
+  const pcm = new Float32Array(16000);
+  for (let i = 0; i < pcm.length; i++) pcm[i] = Math.sin((2 * Math.PI * 440 * i) / 16000) * 0.02;
+  assert.strictEqual(voicedFrames(pcm, 20, 0.01).length, pcm.length);
+});
+
+test("window: tileWindow repeats short clips, truncates long clips, and zero-fills empty clips", () => {
+  const ramp = new Float32Array(8000);
+  for (let i = 0; i < ramp.length; i++) ramp[i] = i / ramp.length + 0.001;
+  const tiled = tileWindow(ramp);
+  assert.strictEqual(tiled.length, WINDOW_SAMPLES);
+  for (const k of [0, 7999, 8000, 32001, WINDOW_SAMPLES - 1]) assert.strictEqual(tiled[k], ramp[k % 8000]);
+  assert.deepStrictEqual(Array.from(tileWindow(Float32Array.from({ length: WINDOW_SAMPLES + 2 }, (_, i) => i)).slice(-2)), [WINDOW_SAMPLES - 2, WINDOW_SAMPLES - 1]);
+  assert.ok(tileWindow(new Float32Array(0)).every((sample) => sample === 0));
+});
+
 test("window: cosine is 1 / 0 / -1 for identical, orthogonal, opposite; 0 for a zero vector", () => {
   const a = Float32Array.of(1, 0);
   assert.ok(Math.abs(cosine(a, a) - 1) < 1e-9);
@@ -1458,6 +1484,7 @@ test("window: RingBuffer slices absolute sample ranges and zero-fills the evicte
   assert.strictEqual(rb.length, 12);
   assert.deepStrictEqual(Array.from(rb.slice(6, 12)), [7, 8, 9, 10, 11, 12]);
   assert.deepStrictEqual(Array.from(rb.slice(0, 2)), [0, 0]);
+  assert.deepStrictEqual(Array.from(rb.slice(0, 6)), [0, 0, 3, 4, 5, 6]);
 });
 
 // ---------- voice profile: base64, codec, store ----------

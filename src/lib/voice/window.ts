@@ -12,6 +12,20 @@ export function fitWindow(pcm: Float32Array): Float32Array {
   return out;
 }
 
+/**
+ * Tile short utterances instead of zero-padding: features.ts normalises each mel bin across time, and
+ * filling most frames with silence otherwise weakens short-utterance speaker verification.
+ */
+export function tileWindow(pcm: Float32Array): Float32Array {
+  if (pcm.length >= WINDOW_SAMPLES) return pcm.slice(0, WINDOW_SAMPLES);
+  const out = new Float32Array(WINDOW_SAMPLES);
+  if (pcm.length === 0) return out;
+  for (let offset = 0; offset < out.length; offset += pcm.length) {
+    out.set(pcm.subarray(0, Math.min(pcm.length, out.length - offset)), offset);
+  }
+  return out;
+}
+
 /** Cosine similarity in [-1, 1]. Robust to un-normalised inputs; 0 if either vector is all-zero. */
 export function cosine(a: Float32Array, b: Float32Array): number {
   const n = Math.min(a.length, b.length);

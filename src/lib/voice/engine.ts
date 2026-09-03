@@ -1,6 +1,6 @@
 import * as ort from "onnxruntime-web";
 import { melSpectrogram, N_MELS } from "./features";
-import { fitWindow } from "./window";
+import { fitWindow, tileWindow } from "./window";
 
 // The ONNX speaker-embedding engine. Runs INSIDE the worker (voice.worker.ts) — onnxruntime-web is a
 // large WASM dependency and must never enter the main bundle. Single-threaded on purpose: multi-thread
@@ -11,7 +11,7 @@ import { fitWindow } from "./window";
 // over time; then L2-normalised so cosine similarity is a dot product.
 
 export type VoiceEngine = {
-  embed(pcm16k: Float32Array): Promise<Float32Array>; // 192-d unit vector
+  embed(pcm16k: Float32Array, opts?: { pad?: "tile" | "zero" }): Promise<Float32Array>; // 192-d unit vector
   close(): Promise<void>;
 };
 
@@ -28,8 +28,9 @@ export async function createEngine(modelUrl: string): Promise<VoiceEngine> {
   const outputName = session.outputNames[0];
 
   return {
-    async embed(pcm16k: Float32Array): Promise<Float32Array> {
-      const { data, frames } = melSpectrogram(fitWindow(pcm16k));
+    async embed(pcm16k: Float32Array, opts?: { pad?: "tile" | "zero" }): Promise<Float32Array> {
+      const window = opts?.pad === "zero" ? fitWindow(pcm16k) : tileWindow(pcm16k);
+      const { data, frames } = melSpectrogram(window);
       const tensor = new ort.Tensor("float32", data, [1, N_MELS, frames]);
       const results = await session.run({ [inputName]: tensor });
       const output = results[outputName];

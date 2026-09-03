@@ -11,11 +11,13 @@
 import { createEngine, type VoiceEngine } from "./engine";
 import { SAMPLE_RATE } from "./features";
 import { RingBuffer, WINDOW_SAMPLES, cosine, meanEmbedding } from "./window";
+import { voicedFrames } from "./vad";
 
 type InMessage =
   | { type: "init"; modelUrl: string }
   | { type: "profile"; embedding: Float32Array | null }
   | { type: "pcm"; frame: Float32Array; epoch: number; tSec: number }
+  | { type: "score-run"; reqId: number; epoch: number; start: number; end: number }
   | { type: "enroll-chunk"; pcm: Float32Array }
   | { type: "enroll-finish" }
   | { type: "enroll-reset" };
@@ -32,16 +34,31 @@ const HOP_SEC = 1.0;
 // Below this RMS a window is essentially silence; scoring it would pull the similarity mean toward 0
 // and misattribute quiet gaps. Placeholder — the /rep/voice meter is the tuning tool.
 const RMS_FLOOR = 0.01;
-const RING_CAPACITY = Math.round(SAMPLE_RATE * (WINDOW_SEC + 2)); // a little headroom over one window
+// A Deepgram final can trail its audio by seconds and a multi-run final can span 20 s+; 30 s of
+// Float32 is ~1.9 MB, discarded continuously and never persisted.
+const RING_CAPACITY = SAMPLE_RATE * 30;
 
 let engine: VoiceEngine | null = null;
 let profile: Float32Array | null = null;
+
+// One ONNX session, one inference at a time. Every onmessage spawns its own async closure, so two
+// score-run requests (or a run and a window hop) would otherwise call session.run concurrently, which
+// onnxruntime-web's wasm backend does not support. All embeds go through this chain, in arrival order.
+let embedChain: Promise<unknown> = Promise.resolve();
+function withEmbedLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = embedChain.then(fn, fn);
+  embedChain = next.catch(() => undefined);
+  return next;
+}
 
 // Scoring state.
 let ring: RingBuffer | null = null;
 let ringEpoch = -1;
 let lastScoredSec = -Infinity;
 let scoring = false; // in-flight embed guard — skip a hop rather than queue
+let pendingRuns = 0; // run-aligned requests pre-empt fixed-window hops
+const runEmbeddings = new Map<number, Float32Array>(); // in-memory vectors only; never audio or persistence
+const RUN_CACHE_CAP = 64; // bounded hand-off cache for Step 4 labels
 
 // Learned customer voice centroid (session/connection-scoped). custSum is the running un-normalised sum
 // of embeddings from windows clearly NOT the rep; custCount caps its growth. Lets attribution decide by
@@ -84,6 +101,7 @@ function onPcm(frame: Float32Array, epoch: number): void {
   const endSec = ring.length / SAMPLE_RATE;
   if (endSec < WINDOW_SEC) return;
   if (endSec - lastScoredSec < HOP_SEC) return;
+  if (pendingRuns > 0) return; // never queue a window hop ahead of a final's exact run
   if (scoring) return; // an embed is still running — skip this hop, never queue
 
   const endSample = ring.length;
@@ -95,8 +113,8 @@ function onPcm(frame: Float32Array, epoch: number): void {
   scoring = true;
   const t0 = startSample / SAMPLE_RATE;
   const t1 = endSample / SAMPLE_RATE;
-  engine
-    .embed(win)
+  const eng = engine;
+  withEmbedLock(() => eng.embed(win))
     .then((emb) => {
       const repSim = cosine(emb, prof);
       const custSim = custCount > 0 && custSum ? cosine(emb, normalized(custSum)) : null;
@@ -113,6 +131,54 @@ function onPcm(frame: Float32Array, epoch: number): void {
     .finally(() => {
       scoring = false;
     });
+}
+
+async function scoreRun(msg: Extract<InMessage, { type: "score-run" }>): Promise<void> {
+  pendingRuns += 1;
+  try {
+    if (msg.epoch !== ringEpoch || !ring) {
+      ctx.postMessage({ type: "run-score", reqId: msg.reqId, ok: false, reason: "epoch" });
+      return;
+    }
+    const fromSample = Math.floor(msg.start * SAMPLE_RATE);
+    const toSample = Math.ceil(msg.end * SAMPLE_RATE);
+    if (fromSample < ring.length - RING_CAPACITY) {
+      ctx.postMessage({ type: "run-score", reqId: msg.reqId, ok: false, reason: "evicted" });
+      return;
+    }
+    if (!engine || !profile) throw new Error("Voice engine or profile is not ready.");
+    const voiced = voicedFrames(ring.slice(fromSample, toSample));
+    const voicedSec = voiced.length / SAMPLE_RATE;
+    if (voicedSec < 0.3) {
+      ctx.postMessage({ type: "run-score", reqId: msg.reqId, ok: false, reason: "short", voicedSec });
+      return;
+    }
+
+    const eng = engine;
+    let emb: Float32Array;
+    if (voiced.length > WINDOW_SAMPLES) {
+      const last = voiced.length - WINDOW_SAMPLES;
+      const starts = [...new Set([0, Math.floor(last / 2), last])];
+      const chunks: Float32Array[] = [];
+      for (const start of starts) chunks.push(await withEmbedLock(() => eng.embed(voiced.slice(start, start + WINDOW_SAMPLES))));
+      emb = meanEmbedding(chunks);
+    } else {
+      emb = await withEmbedLock(() => eng.embed(voiced));
+    }
+    runEmbeddings.delete(msg.reqId);
+    runEmbeddings.set(msg.reqId, emb);
+    while (runEmbeddings.size > RUN_CACHE_CAP) runEmbeddings.delete(runEmbeddings.keys().next().value!);
+
+    const repSim = cosine(emb, profile);
+    const custSim = custCount > 0 && custSum ? cosine(emb, normalized(custSum)) : null;
+    ctx.postMessage({ type: "run-score", reqId: msg.reqId, ok: true, repSim, custSim, voicedSec });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    ctx.postMessage({ type: "run-score", reqId: msg.reqId, ok: false, reason: "error" });
+    ctx.postMessage({ type: "error", message });
+  } finally {
+    pendingRuns -= 1;
+  }
 }
 
 async function finishEnroll(): Promise<void> {
@@ -134,10 +200,10 @@ async function finishEnroll(): Promise<void> {
   for (let start = 0; start + WINDOW_SAMPLES <= all.length; start += hop) {
     const w = all.subarray(start, start + WINDOW_SAMPLES);
     if (rms(w) < RMS_FLOOR) continue;
-    embs.push(await engine.embed(new Float32Array(w)));
+    embs.push(await engine.embed(new Float32Array(w), { pad: "zero" }));
   }
   // Shorter than one window (or all silent but present): embed the whole thing padded, rather than fail.
-  if (embs.length === 0 && all.length > 0) embs.push(await engine.embed(all));
+  if (embs.length === 0 && all.length > 0) embs.push(await engine.embed(all, { pad: "zero" }));
 
   const mean = meanEmbedding(embs);
   if (mean.length === 0) {
@@ -161,6 +227,9 @@ ctx.onmessage = (ev: MessageEvent) => {
           break;
         case "pcm":
           onPcm(msg.frame, msg.epoch);
+          break;
+        case "score-run":
+          await scoreRun(msg);
           break;
         case "enroll-chunk":
           enrollFrames.push(new Float32Array(msg.pcm));

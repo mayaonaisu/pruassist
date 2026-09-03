@@ -17,7 +17,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createResampler } from "../src/lib/pcm.ts";
 import { melSpectrogram } from "../src/lib/voice/features.ts";
-import { fitWindow, cosine } from "../src/lib/voice/window.ts";
+import { fitWindow, tileWindow, cosine } from "../src/lib/voice/window.ts";
+import { voicedFrames } from "../src/lib/voice/vad.ts";
 
 const MODEL = "public/models/next-tdnn-c128.onnx";
 
@@ -82,8 +83,8 @@ async function main() {
   const inName = session.inputNames[0];
   const outName = session.outputNames[0];
 
-  async function embed(pcm16k: Float32Array): Promise<Float32Array> {
-    const { data, frames } = melSpectrogram(fitWindow(pcm16k));
+  async function embed(pcm16k: Float32Array, pad: "zero" | "tile" = "zero"): Promise<Float32Array> {
+    const { data, frames } = melSpectrogram(pad === "tile" ? tileWindow(pcm16k) : fitWindow(pcm16k));
     const t = new ort.Tensor("float32", data, [1, 80, frames]);
     const r = await session.run({ [inName]: t });
     const out = r[outName];
@@ -113,9 +114,12 @@ async function main() {
   const david2 = "The co-insurance is the share of the bill you pay after the deductible, and the rider can bring that share right down.";
   const zira1 = "So does that mean I have to pay the first part of every hospital bill myself before the insurance starts to help me?";
 
-  const embA = await embed(clipTo16k(david1, "Microsoft David Desktop", "a"));
-  const embB = await embed(clipTo16k(david2, "Microsoft David Desktop", "b"));
-  const embC = await embed(clipTo16k(zira1, "Microsoft Zira Desktop", "c"));
+  const clipA = clipTo16k(david1, "Microsoft David Desktop", "a");
+  const clipB = clipTo16k(david2, "Microsoft David Desktop", "b");
+  const clipC = clipTo16k(zira1, "Microsoft Zira Desktop", "c");
+  const embA = await embed(clipA);
+  const embB = await embed(clipB);
+  const embC = await embed(clipC);
 
   const same = cosine(embA, embB);
   const diff = cosine(embA, embC);
@@ -127,7 +131,27 @@ async function main() {
     console.error("\nFAIL: same-speaker similarity is not greater than different-speaker — the mel pipeline is likely wrong.");
     process.exit(1);
   }
-  console.log("\nPASS: same-speaker similarity exceeds different-speaker.");
+  console.log("\nPASS: same-speaker similarity exceeds different-speaker.\n");
+
+  const voicedA = voicedFrames(clipA);
+  const voicedC = voicedFrames(clipC);
+  console.log("Short-clip padding regression:");
+  console.log("  sec | same zero | same tile | diff zero | diff tile");
+  for (const sec of [0.5, 1.0, 2.0]) {
+    const samples = Math.round(sec * 16000);
+    const [aZero, aTile, cZero, cTile] = await Promise.all([
+      embed(voicedA.slice(0, samples), "zero"), embed(voicedA.slice(0, samples), "tile"),
+      embed(voicedC.slice(0, samples), "zero"), embed(voicedC.slice(0, samples), "tile"),
+    ]);
+    const sameZero = cosine(aZero, embB);
+    const sameTile = cosine(aTile, embB);
+    const diffZero = cosine(cZero, embB);
+    const diffTile = cosine(cTile, embB);
+    console.log(`  ${sec.toFixed(1)} | ${sameZero.toFixed(3).padStart(9)} | ${sameTile.toFixed(3).padStart(9)} | ${diffZero.toFixed(3).padStart(9)} | ${diffTile.toFixed(3).padStart(9)}`);
+    if (sec <= 1 && sameTile < sameZero - 0.02) throw new Error(`tile padding regressed same-speaker similarity at ${sec.toFixed(1)} s`);
+    if (diffTile > diffZero + 0.02) console.warn(`  WARN: tile padding raised different-speaker similarity at ${sec.toFixed(1)} s`);
+  }
+  console.log("\nPASS: short same-speaker clips meet the tile-padding tolerance.");
 }
 
 main().catch((e) => {
