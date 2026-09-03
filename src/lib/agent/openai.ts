@@ -9,12 +9,13 @@ import type { Hit } from "../retrieval";
 // this can never regress a deploy that has not set the key.
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-// gpt-4o by default: measurably more careful than gpt-4o-mini on this corpus — it declines to invent
-// figures in a suggested line ("reduces out-of-pocket costs significantly" vs mini's fabricated
-// "to S$0.00") and its grades are steadier (mini flaps the teach-back-partial fixture). These are
-// background / fallback calls off the rep's critical path (live generation is Groq), so the extra
-// latency and cost over mini buy real quality. Overridable with OPENAI_MODEL — set gpt-4o-mini to cut cost.
-const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-4o";
+// gpt-4.1-mini by default: OpenAI rates it at or above gpt-4o on intelligence at roughly half the
+// latency and ~83% less cost, and it holds grade quality here (replay:all 8/8, the teach-back-partial
+// fixture stays stable — unlike gpt-4o-mini, which flapped it and fabricated figures). These are
+// background / fallback calls off the rep's critical path (live generation is Groq), so trimming their
+// latency helps the lookahead land inside Vercel's 60s function limit. Overridable with OPENAI_MODEL
+// (e.g. gpt-4.1-nano for even lower latency on simpler work, or gpt-4o for maximum care).
+const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini";
 
 export const openaiEnabled = (): boolean => !!process.env.OPENAI_API_KEY?.trim();
 
