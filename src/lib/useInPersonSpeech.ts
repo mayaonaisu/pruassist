@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLineStore, speechStatusFrom, type LocalSpeech } from "./useTranscript";
 import { useDiarizedSpeech, type DiarizedResult, type PcmTap } from "./useDiarizedSpeech";
 import { useBrowserSpeech, type SpeechResult, type SpeechStatus } from "./useBrowserSpeech";
@@ -13,6 +13,8 @@ import {
   interimRole,
   noteProvisional,
   relabelPlan,
+  optsForThreshold,
+  DEFAULT_ATTRIBUTE_OPTS,
   type Role,
   type SpeakerMap,
   type ProvisionalBook,
@@ -39,6 +41,7 @@ export type InPersonSpeech = LocalSpeech & {
   micPaused: boolean;
   status: DeepgramStatus | SpeechStatus;
   voiceStatus: VoiceprintStatus; // whether the rep's voiceprint is loaded and scoring
+  liveScore: () => number | null; // newest voiceprint similarity, for the tuning meter
   swapSpeaker: (id: string) => void; // per-line correction
 };
 
@@ -46,7 +49,7 @@ export function useInPersonSpeech(
   repName: string,
   customerName: string,
   enabled: boolean,
-  opts?: { profile?: Float32Array | null },
+  opts?: { profile?: Float32Array | null; voiceThreshold?: number },
 ): InPersonSpeech {
   const store = useLineStore();
   const { addFinal, setSpeakerInterim, clearInterim } = store;
@@ -62,7 +65,15 @@ export function useInPersonSpeech(
   const wantDeepgram = deepgramEnabled();
   const profile = opts?.profile ?? null;
   const voiceprint = useVoiceprint({ enabled: enabled && wantDeepgram, profile });
-  const { status: voiceStatus, onPcm: vpOnPcm, scoreBetween: vpScore, liveVerdict: vpVerdict } = voiceprint;
+  const { status: voiceStatus, onPcm: vpOnPcm, scoreBetween: vpScore, liveVerdict: vpVerdict, liveScore: vpLiveScore } = voiceprint;
+
+  // The live "Voice match" threshold (from the console slider) → attribution opts. Held in a ref so
+  // onDiarized reads the current value without being rebuilt each time the slider moves.
+  const attrOpts = useMemo(() => optsForThreshold(opts?.voiceThreshold ?? DEFAULT_ATTRIBUTE_OPTS.voiceHi), [opts?.voiceThreshold]);
+  const attrOptsRef = useRef(attrOpts);
+  useEffect(() => {
+    attrOptsRef.current = attrOpts;
+  });
 
   const setOverride = useCallback((r: Role | null) => {
     overrideRef.current = r;
@@ -108,7 +119,7 @@ export function useInPersonSpeech(
       // wrappers guarantee the customer's words are emitted even if scoring ever fails.
       const safeVerdict = (): Role | null => {
         try {
-          return vpVerdict();
+          return vpVerdict(attrOptsRef.current.voiceHi, attrOptsRef.current.voiceLo);
         } catch {
           return null;
         }
@@ -130,7 +141,7 @@ export function useInPersonSpeech(
               voice: vpScore(epochRef.current, run.start, run.end),
               text: textCue(run.text, { repName, customerName }),
             });
-            const res = attributeFinal(mapRef.current, runs, overrideRef.current, evidence);
+            const res = attributeFinal(mapRef.current, runs, overrideRef.current, evidence, attrOptsRef.current);
             mapRef.current = res.map;
             const now = Date.now();
             for (const line of res.lines) {
@@ -208,6 +219,7 @@ export function useInPersonSpeech(
     micPaused: engine === "deepgram" ? micPaused : false,
     status,
     voiceStatus: engine === "deepgram" ? voiceStatus : "off",
+    liveScore: vpLiveScore,
     swapSpeaker,
   };
 }

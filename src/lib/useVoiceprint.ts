@@ -23,7 +23,8 @@ export type Voiceprint = {
   status: VoiceprintStatus;
   onPcm: PcmTap;
   scoreBetween: (epoch: number, start: number, end: number) => VoiceEvidence | null;
-  liveVerdict: () => Role | null;
+  liveVerdict: (hi?: number, lo?: number) => Role | null;
+  liveScore: () => number | null; // the newest similarity, for the tuning meter (threshold-independent)
   warm: () => void;
 };
 
@@ -109,13 +110,23 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
   );
 
   const liveVerdict = useCallback(
-    () => recentVerdict(ringRef.current, lastEpochRef.current, lastTSecRef.current, DEFAULT_ATTRIBUTE_OPTS.voiceHi, DEFAULT_ATTRIBUTE_OPTS.voiceLo),
+    (hi: number = DEFAULT_ATTRIBUTE_OPTS.voiceHi, lo: number = DEFAULT_ATTRIBUTE_OPTS.voiceLo) =>
+      recentVerdict(ringRef.current, lastEpochRef.current, lastTSecRef.current, hi, lo),
     [],
   );
+
+  // The newest similarity of the current epoch (any age), for the live tuning meter.
+  const liveScore = useCallback((): number | null => {
+    let latest: ScoreSample | null = null;
+    for (const s of ringRef.current) {
+      if (s.epoch === lastEpochRef.current && (!latest || s.t1 > latest.t1)) latest = s;
+    }
+    return latest ? latest.score : null;
+  }, []);
 
   const warm = useCallback(() => {
     fetch(VOICE_MODEL_URL, { cache: "force-cache" }).catch(() => {});
   }, []);
 
-  return { status, onPcm, scoreBetween, liveVerdict, warm };
+  return { status, onPcm, scoreBetween, liveVerdict, liveScore, warm };
 }

@@ -43,7 +43,7 @@ const { detectAssent, detectDivergence, detectLatency, detectRaised, detectReAsk
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
 const { lastFromCustomer, newestAt, toTurns, windowToSend, applyLineEdit, applySpeakerSwap, groupCitations } = await import("../src/lib/transcript.ts");
-const { splitRuns, emptySpeakerMap, attributeFinal, interimRole, noteProvisional, relabelPlan } = await import("../src/lib/diarize.ts");
+const { splitRuns, emptySpeakerMap, attributeFinal, interimRole, noteProvisional, relabelPlan, optsForThreshold, VOICE_DEADZONE } = await import("../src/lib/diarize.ts");
 const { textCue } = await import("../src/lib/speaker-cues.ts");
 const { pushSample, scoreBetween, recentVerdict } = await import("../src/lib/voice-ring.ts");
 // Voice feature/window maths are pure and safe to import here; engine.ts (onnxruntime-web) is NOT.
@@ -1280,6 +1280,18 @@ test("attributeFinal: override on a multi-run final forces roles but does not re
   assert.deepStrictEqual(r.lines.map((l) => l.role), ["customer", "customer"]);
   assert.deepStrictEqual(r.map.assigned, { 0: "rep", 1: "customer" }); // unchanged
   assert.deepStrictEqual(r.rebound, []);
+});
+
+test("optsForThreshold: maps the slider value to voiceHi and a dead-zone voiceLo, clamped", () => {
+  const mid = optsForThreshold(0.5);
+  assert.strictEqual(mid.voiceHi, 0.5);
+  assert.ok(Math.abs(mid.voiceLo - (0.5 - VOICE_DEADZONE)) < 1e-9);
+  assert.strictEqual(mid.voiceMinN, 2); // other fields preserved from the base
+  const low = optsForThreshold(0.35);
+  assert.ok(Math.abs(low.voiceHi - 0.35) < 1e-9);
+  assert.ok(Math.abs(low.voiceLo - 0.15) < 1e-9);
+  assert.deepStrictEqual([optsForThreshold(2).voiceHi, optsForThreshold(-2).voiceHi], [1, -1]); // clamped
+  assert.strictEqual(optsForThreshold(-2).voiceLo, -1); // voiceLo clamped too
 });
 
 test("interimRole: override, else live voice, else last final, else rep", () => {

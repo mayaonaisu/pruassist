@@ -113,7 +113,24 @@ function InPersonConsole({
 }) {
   // The rep's on-device voiceprint (if enrolled) drives attribution so they needn't speak first.
   const { profile: voiceProfile } = useVoiceProfile();
-  const speech = useInPersonSpeech(repName, customerName, true, { profile: voiceProfile ?? null });
+  // The live "Voice match" threshold, tunable in-console and remembered per device.
+  const [voiceThreshold, setVoiceThreshold] = useState<number>(() => {
+    try {
+      const v = parseFloat(localStorage.getItem("pru:voiceThreshold") ?? "");
+      return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5;
+    } catch {
+      return 0.5;
+    }
+  });
+  const changeThreshold = useCallback((v: number) => {
+    setVoiceThreshold(v);
+    try {
+      localStorage.setItem("pru:voiceThreshold", String(v));
+    } catch {
+      /* storage unavailable — keep the in-memory value */
+    }
+  }, []);
+  const speech = useInPersonSpeech(repName, customerName, true, { profile: voiceProfile ?? null, voiceThreshold });
   const { lines, interim, latest, editLine } = useTranscript(undefined, speech);
   const consent = useConsent(session.roomId);
   useWakeLock(true);
@@ -128,6 +145,18 @@ function InPersonConsole({
   // board mounts. Recording and comprehension polling keep running throughout — nothing here unmounts.
   const [sharing, setSharing] = useState(false);
   const [board, boardDispatch] = useReducer(reduceBoard, initialBoardState);
+
+  // Live voiceprint similarity for the in-console "Voice match" tuning meter — polled only while the
+  // tuner is on screen (rep view, voiceprint ready). setState happens in the interval callback, never
+  // synchronously in the effect.
+  const [liveScore, setLiveScore] = useState<number | null>(null);
+  const voiceReady = speech.engine === "deepgram" && speech.voiceStatus === "ready";
+  const liveScoreFn = speech.liveScore;
+  useEffect(() => {
+    if (!voiceReady || sharing) return;
+    const t = setInterval(() => setLiveScore(liveScoreFn()), 250);
+    return () => clearInterval(t);
+  }, [voiceReady, sharing, liveScoreFn]);
 
   const [startedAt, setStartedAt] = useState(0);
   const startRef = useRef(0);
@@ -321,6 +350,42 @@ function InPersonConsole({
           >
             Back to my view
           </button>
+        </div>
+      )}
+
+      {/* Solo-tuning control: watch your own live similarity and set where "you" begins. Rep view only,
+          and only when the voiceprint is scoring; hidden from the customer while sharing. */}
+      {!sharing && voiceReady && (
+        <div className="voice-tune" role="group" aria-label="Voice match sensitivity">
+          <span className="voice-tune-label">Voice match</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={voiceThreshold}
+            onChange={(e) => changeThreshold(parseFloat(e.target.value))}
+            className="voice-slider"
+            aria-label="Voice match threshold"
+          />
+          <span className="voice-tune-val" title="Similarity at or above this counts as you">
+            ≥ {voiceThreshold.toFixed(2)} = you
+          </span>
+          <span
+            className={`voice-meter voice-tune-meter ${
+              liveScore == null
+                ? ""
+                : liveScore >= voiceThreshold
+                  ? "voice-meter-hi"
+                  : liveScore <= voiceThreshold - 0.2
+                    ? "voice-meter-lo"
+                    : "voice-meter-mid"
+            }`}
+            aria-hidden
+          >
+            <div className="voice-meter-fill" style={{ width: `${liveScore == null ? 0 : Math.round(((liveScore + 1) / 2) * 100)}%` }} />
+          </span>
+          <span className="voice-tune-live">{liveScore == null ? "listening…" : `live ${liveScore.toFixed(2)}`}</span>
         </div>
       )}
 

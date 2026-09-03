@@ -92,6 +92,17 @@ export function emptySpeakerMap(): SpeakerMap {
 export type AttributeOpts = { voiceHi: number; voiceLo: number; voiceMinN: number; flipMinN: number; textMargin: number };
 export const DEFAULT_ATTRIBUTE_OPTS: AttributeOpts = { voiceHi: 0.5, voiceLo: 0.3, voiceMinN: 2, flipMinN: 4, textMargin: 2 };
 
+// The gap the in-person "Voice match" slider keeps between the rep threshold and the customer
+// threshold — the dead zone that stops one borderline window from flip-flapping the binding.
+export const VOICE_DEADZONE = 0.2;
+
+// Build AttributeOpts from a single tunable rep-match threshold (the slider's value): similarity ≥ T is
+// the rep, ≤ T − deadzone is the customer, in between defers to text cues. T is clamped to [-1, 1].
+export function optsForThreshold(voiceHi: number, base: AttributeOpts = DEFAULT_ATTRIBUTE_OPTS): AttributeOpts {
+  const hi = Math.max(-1, Math.min(1, voiceHi));
+  return { ...base, voiceHi: hi, voiceLo: Math.max(-1, hi - VOICE_DEADZONE) };
+}
+
 // An index whose assignment changed from an existing (already-bound) value — the signal to relabel any
 // lines already emitted under the old role.
 export type Rebind = { speakerIndex: number; from: Role; to: Role };

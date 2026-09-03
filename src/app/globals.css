@@ -2400,3 +2400,46 @@ button {
 .voice-meter-lo .voice-meter-fill {
   background: var(--pru);
 }
+
+/* In-console "Voice match" tuning row (in-person rep view) */
+.voice-tune {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  margin-top: 8px;
+  padding: 7px 12px;
+  background: var(--brochure-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.voice-tune-label {
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.voice-slider {
+  flex: 1;
+  min-width: 120px;
+  max-width: 320px;
+  accent-color: var(--slate);
+  height: 24px;
+}
+.voice-tune-val {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+.voice-tune-meter {
+  width: 120px;
+  flex: none;
+}
+.voice-tune-live {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  color: var(--ink-3);
+  min-width: 78px;
+  text-align: right;
+}
