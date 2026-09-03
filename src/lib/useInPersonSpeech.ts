@@ -53,7 +53,7 @@ export function useInPersonSpeech(
   repName: string,
   customerName: string,
   enabled: boolean,
-  opts?: { profile?: Float32Array | null; voiceThreshold?: number },
+  opts?: { profile?: Float32Array | null; selfMean?: number | null; voiceThreshold?: number },
 ): InPersonSpeech {
   const store = useLineStore();
   const { addFinal, setSpeakerInterim, clearInterim } = store;
@@ -66,13 +66,15 @@ export function useInPersonSpeech(
   const queueRef = useRef(Promise.resolve());
   // In memory only: contains transcript text, dies with this hook, and is never posted anywhere.
   const logRef = useRef<VoiceLogEntry[]>([]);
+  // In-memory supervision only; bounded with the transcript and never persisted.
+  const lineRunRef = useRef(new Map<string, { reqId: number; role: Role }>());
   const [override, setOverrideState] = useState<Role | null>(null);
   const [activeRoleState, setActiveRoleState] = useState<Role>("rep");
 
   const wantDeepgram = deepgramEnabled();
   const profile = opts?.profile ?? null;
-  const voiceprint = useVoiceprint({ enabled: enabled && wantDeepgram, profile });
-  const { status: voiceStatus, onPcm: vpOnPcm, scoreBetween: vpScore, scoreRun, liveVerdict: vpVerdict, liveScore: vpLiveScore, liveCustScore: vpLiveCustScore } = voiceprint;
+  const voiceprint = useVoiceprint({ enabled: enabled && wantDeepgram, profile, selfMean: opts?.selfMean });
+  const { status: voiceStatus, onPcm: vpOnPcm, scoreBetween: vpScore, scoreRun, label, liveVerdict: vpVerdict, liveScore: vpLiveScore, liveCustScore: vpLiveCustScore } = voiceprint;
   const voiceStatusRef = useRef<VoiceprintStatus>("off");
   useEffect(() => {
     voiceStatusRef.current = voiceStatus;
@@ -145,6 +147,14 @@ export function useInPersonSpeech(
       const rows: VoiceLogEntry[] = [];
       res.lines.forEach((line, i) => {
         const id = emit(line.role, line.text);
+        const reqId = scored[i]?.reqId;
+        if (id && reqId != null) {
+          lineRunRef.current.set(id, { reqId, role: line.role });
+          while (lineRunRef.current.size > 200) lineRunRef.current.delete(lineRunRef.current.keys().next().value!);
+        }
+        if (reqId != null && (line.source === "voice-strong" || line.source === "override")) {
+          label(reqId, line.role, true);
+        }
         if (id && line.provisional && overrideRef.current === null) {
           bookRef.current = noteProvisional(bookRef.current, line.speakerIndex, id, now);
         }
@@ -189,7 +199,7 @@ export function useInPersonSpeech(
     }
     clearInterim(repName);
     clearInterim(customerName);
-  }, [clearInterim, customerName, emit, repName, scoreRun, store, vpScore]);
+  }, [clearInterim, customerName, emit, label, repName, scoreRun, store, vpScore]);
 
   // Deepgram: split the final into per-speaker runs and attribute each with voice + text evidence;
   // interims use the override, the live voice verdict, then the last final's role.
@@ -261,7 +271,15 @@ export function useInPersonSpeech(
   const status: DeepgramStatus | SpeechStatus = engine === "deepgram" ? dgStatus : browserStatus;
   const speech: SpeechStatus = engine === "deepgram" ? speechStatusFrom(dgStatus) : browserStatus;
 
-  const swapSpeaker = useCallback((id: string) => store.swapLocalSpeaker(id, repName, customerName), [store, repName, customerName]);
+  const swapSpeaker = useCallback((id: string) => {
+    const run = lineRunRef.current.get(id);
+    if (run) {
+      const flippedRole: Role = run.role === "rep" ? "customer" : "rep";
+      label(run.reqId, flippedRole, true);
+      lineRunRef.current.set(id, { ...run, role: flippedRole });
+    }
+    store.swapLocalSpeaker(id, repName, customerName);
+  }, [label, store, repName, customerName]);
   const voiceLog = useCallback((): readonly VoiceLogEntry[] => logRef.current.slice(), []);
 
   return {

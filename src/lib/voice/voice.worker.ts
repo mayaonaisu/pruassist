@@ -10,14 +10,15 @@
 
 import { createEngine, type VoiceEngine } from "./engine";
 import { SAMPLE_RATE } from "./features";
-import { RingBuffer, WINDOW_SAMPLES, cosine, meanEmbedding } from "./window";
+import { anchorOf, RingBuffer, WINDOW_SAMPLES, cosine, meanEmbedding, seedLo } from "./window";
 import { voicedFrames } from "./vad";
 
 type InMessage =
   | { type: "init"; modelUrl: string }
-  | { type: "profile"; embedding: Float32Array | null }
+  | { type: "profile"; embedding: Float32Array | null; selfMean?: number | null }
   | { type: "pcm"; frame: Float32Array; epoch: number; tSec: number }
   | { type: "score-run"; reqId: number; epoch: number; start: number; end: number }
+  | { type: "label"; reqId: number; role: "rep" | "customer"; confident: boolean }
   | { type: "enroll-chunk"; pcm: Float32Array }
   | { type: "enroll-finish" }
   | { type: "enroll-reset" };
@@ -40,6 +41,7 @@ const RING_CAPACITY = SAMPLE_RATE * 30;
 
 let engine: VoiceEngine | null = null;
 let profile: Float32Array | null = null;
+let selfMean: number | null = null;
 
 // One ONNX session, one inference at a time. Every onmessage spawns its own async closure, so two
 // score-run requests (or a run and a window hop) would otherwise call session.run concurrently, which
@@ -60,13 +62,20 @@ let pendingRuns = 0; // run-aligned requests pre-empt fixed-window hops
 const runEmbeddings = new Map<number, Float32Array>(); // in-memory vectors only; never audio or persistence
 const RUN_CACHE_CAP = 64; // bounded hand-off cache for Step 4 labels
 
+let repSum: Float32Array | null = null;
+let repCount = 0;
+let anchorCache: Float32Array | null = null;
+// The enrolled profile counts as ten confident rep runs, so the anchor moves slowly and one wrong
+// label cannot hijack it.
+const ANCHOR_PRIOR = 10;
+const REP_CAP = 40; // enough session adaptation without letting a long conversation erase enrolment
+
 // Learned customer voice centroid (session/connection-scoped). custSum is the running un-normalised sum
 // of embeddings from windows clearly NOT the rep; custCount caps its growth. Lets attribution decide by
 // which voice a window is CLOSER to, instead of an absolute cutoff.
 let custSum: Float32Array | null = null;
 let custCount = 0;
 const CUST_CAP = 40; // stop growing after ~40 customer windows — plenty and keeps the centroid stable
-const SEED_LO = 0.35; // a window this dissimilar to the rep seeds/grows the customer centroid
 
 // Enrolment state.
 let enrollFrames: Float32Array[] = [];
@@ -86,6 +95,31 @@ function normalized(v: Float32Array): Float32Array {
   return out;
 }
 
+function anchor(): Float32Array | null {
+  if (!profile) return null;
+  return anchorCache ?? (anchorCache = anchorOf(profile, repSum, ANCHOR_PRIOR));
+}
+
+function addTo(sum: Float32Array | null, emb: Float32Array): Float32Array {
+  const next = sum ?? new Float32Array(emb.length);
+  for (let i = 0; i < emb.length; i++) next[i] += emb[i];
+  return next;
+}
+
+function labelRun(msg: Extract<InMessage, { type: "label" }>): void {
+  if (!msg.confident) return;
+  const emb = runEmbeddings.get(msg.reqId);
+  if (!emb) return;
+  if (msg.role === "customer" && custCount < CUST_CAP) {
+    custSum = addTo(custSum, emb);
+    custCount += 1;
+  } else if (msg.role === "rep" && repCount < REP_CAP) {
+    repSum = addTo(repSum, emb);
+    repCount += 1;
+    anchorCache = null;
+  }
+}
+
 function onPcm(frame: Float32Array, epoch: number): void {
   const prof = profile;
   if (!engine || !prof) return; // nothing to score against yet
@@ -95,6 +129,10 @@ function onPcm(frame: Float32Array, epoch: number): void {
     lastScoredSec = -Infinity;
     custSum = null; // a new connection is a fresh room — relearn the customer's voice
     custCount = 0;
+    repSum = null;
+    repCount = 0;
+    anchorCache = null;
+    runEmbeddings.clear();
   }
   ring.append(frame);
 
@@ -116,11 +154,12 @@ function onPcm(frame: Float32Array, epoch: number): void {
   const eng = engine;
   withEmbedLock(() => eng.embed(win))
     .then((emb) => {
-      const repSim = cosine(emb, prof);
+      const repSim = cosine(emb, anchor() ?? prof);
       const custSim = custCount > 0 && custSum ? cosine(emb, normalized(custSum)) : null;
       // Grow the customer centroid from windows clearly not the rep — and, once a centroid exists, only
       // when the window is at least as close to the customer as to the rep, so rep audio can't pollute it.
-      if (repSim <= SEED_LO && (custSim == null || custSim >= repSim) && custCount < CUST_CAP) {
+      // Relative to the rep's own baseline: a friend at 0.40 would never seed at an absolute 0.35.
+      if (repSim <= seedLo(selfMean) && (custSim == null || custSim >= repSim) && custCount < CUST_CAP) {
         if (!custSum) custSum = new Float32Array(emb.length);
         for (let i = 0; i < emb.length; i++) custSum[i] += emb[i];
         custCount += 1;
@@ -169,7 +208,7 @@ async function scoreRun(msg: Extract<InMessage, { type: "score-run" }>): Promise
     runEmbeddings.set(msg.reqId, emb);
     while (runEmbeddings.size > RUN_CACHE_CAP) runEmbeddings.delete(runEmbeddings.keys().next().value!);
 
-    const repSim = cosine(emb, profile);
+    const repSim = cosine(emb, anchor() ?? profile);
     const custSim = custCount > 0 && custSum ? cosine(emb, normalized(custSum)) : null;
     ctx.postMessage({ type: "run-score", reqId: msg.reqId, ok: true, repSim, custSim, voicedSec });
   } catch (err) {
@@ -224,12 +263,20 @@ ctx.onmessage = (ev: MessageEvent) => {
           break;
         case "profile":
           profile = msg.embedding ? new Float32Array(msg.embedding) : null;
+          selfMean = msg.selfMean ?? null;
+          repSum = null;
+          repCount = 0;
+          anchorCache = null;
+          runEmbeddings.clear();
           break;
         case "pcm":
           onPcm(msg.frame, msg.epoch);
           break;
         case "score-run":
           await scoreRun(msg);
+          break;
+        case "label":
+          labelRun(msg);
           break;
         case "enroll-chunk":
           enrollFrames.push(new Float32Array(msg.pcm));

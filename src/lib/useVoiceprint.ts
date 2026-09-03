@@ -26,13 +26,16 @@ export type Voiceprint = {
   scoreBetween: (epoch: number, start: number, end: number) => VoiceEvidence | null;
   // Includes the request id so Step 4 can label the exact embedding behind a decision.
   scoreRun: (epoch: number, start: number, end: number) => Promise<{ evidence: VoiceEvidence | null; reqId: number }>;
+  label: (reqId: number, role: Role, confident: boolean) => void;
   liveVerdict: (hi?: number, lo?: number, margin?: number) => Role | null;
   liveScore: () => number | null; // newest rep similarity, for the tuning meter
   liveCustScore: () => number | null; // newest customer-centroid similarity (null until seeded)
   warm: () => void;
 };
 
-export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile: Float32Array | null }): Voiceprint {
+export function useVoiceprint({ enabled, profile, selfMean = null }: {
+  enabled: boolean; profile: Float32Array | null; selfMean?: number | null;
+}): Voiceprint {
   // Only the worker's async outcome is tracked in state (setState lives in its message handler, never
   // synchronously in the effect); "off" is derived from `active`. Since the console loads the profile
   // once, the lifecycle is simply loading → ready.
@@ -76,7 +79,7 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
         const msg = e.data;
         if (msg.type === "ready") {
           const copy = profile.slice(); // transfer a copy; the prop's buffer stays intact
-          worker.postMessage({ type: "profile", embedding: copy }, [copy.buffer]);
+          worker.postMessage({ type: "profile", embedding: copy, selfMean }, [copy.buffer]);
           setOutcome("ready");
         } else if (msg.type === "score") {
           ringRef.current = pushSample(ringRef.current, {
@@ -119,7 +122,7 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
       workerRef.current = null;
       ringRef.current = [];
     };
-  }, [active, profile]);
+  }, [active, profile, selfMean]);
 
   const scoreRun = useCallback((epoch: number, start: number, end: number) => {
     const reqId = nextReqIdRef.current++;
@@ -134,6 +137,16 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
         resolve({ evidence: null, reqId });
       }
     });
+  }, []);
+
+  const label = useCallback((reqId: number, role: Role, confident: boolean) => {
+    const worker = workerRef.current;
+    if (!worker) return;
+    try {
+      worker.postMessage({ type: "label", reqId, role, confident });
+    } catch {
+      /* adaptation is optional and must never break transcript handling */
+    }
   }, []);
 
   // Stable over refs so it never restarts the diarized socket's capture effect. Forwards the frame to
@@ -176,5 +189,5 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
     fetch(VOICE_MODEL_URL, { cache: "force-cache" }).catch(() => {});
   }, []);
 
-  return { status, onPcm, scoreBetween, scoreRun, liveVerdict, liveScore, liveCustScore, warm };
+  return { status, onPcm, scoreBetween, scoreRun, label, liveVerdict, liveScore, liveCustScore, warm };
 }

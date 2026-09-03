@@ -58,6 +58,18 @@ export function meanEmbedding(list: Float32Array[]): Float32Array {
   return acc;
 }
 
+/** Build the session rep anchor while treating the enrolled profile as `prior` observations. */
+export function anchorOf(profile: Float32Array, repSum: Float32Array | null, prior: number): Float32Array {
+  const acc = new Float32Array(profile.length);
+  for (let i = 0; i < profile.length; i++) acc[i] = profile[i] * prior + (repSum?.[i] ?? 0);
+  return meanEmbedding([acc]);
+}
+
+/** A speaker-relative customer seed admits voices that an absolute cutoff can miss. */
+export function seedLo(selfMean?: number | null): number {
+  return selfMean != null ? selfMean - 0.2 : 0.35;
+}
+
 /**
  * A fixed-capacity circular buffer of 16 kHz samples with ABSOLUTE indexing: `append` advances a
  * running total, and `slice(fromSample, toSample)` returns that absolute range (samples no longer

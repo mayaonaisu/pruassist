@@ -49,7 +49,7 @@ const { pushSample, scoreBetween, recentVerdict } = await import("../src/lib/voi
 const { pushLog, withTimeout } = await import("../src/lib/voice-log.ts");
 // Voice feature/window maths are pure and safe to import here; engine.ts (onnxruntime-web) is NOT.
 const { melSpectrogram, logMelFrame, melCentersHz, N_MELS } = await import("../src/lib/voice/features.ts");
-const { fitWindow, tileWindow, cosine, meanEmbedding, WINDOW_SAMPLES, RingBuffer } = await import("../src/lib/voice/window.ts");
+const { anchorOf, seedLo, fitWindow, tileWindow, cosine, meanEmbedding, WINDOW_SAMPLES, RingBuffer } = await import("../src/lib/voice/window.ts");
 const { voicedFrames, voicedSeconds } = await import("../src/lib/voice/vad.ts");
 const { bytesToBase64, base64ToBytes } = await import("../src/lib/base64.ts");
 const { encodeProfile, decodeProfile, PROFILE_DIMS } = await import("../src/lib/voice/profile-codec.ts");
@@ -1559,6 +1559,19 @@ test("window: meanEmbedding averages then L2-normalises", () => {
   assert.ok(Math.abs(Math.sqrt(norm) - 1) < 1e-6); // Float32 precision
   assert.ok(Math.abs(m[0] - 0.6) < 1e-6 && Math.abs(m[1] - 0.8) < 1e-6);
   assert.strictEqual(meanEmbedding([]).length, 0);
+});
+
+test("window: adaptive anchor starts at the profile and moves toward confident rep runs", () => {
+  const profile = Float32Array.of(1, 0);
+  assert.deepStrictEqual(Array.from(anchorOf(profile, null, 10)), [1, 0]);
+  const moved = anchorOf(profile, Float32Array.of(0, 100), 10);
+  assert.ok(moved[1] > moved[0]);
+  assert.ok(Math.abs(cosine(moved, Float32Array.of(0, 1)) - moved[1]) < 1e-6);
+});
+
+test("window: customer seeding threshold follows the rep self-baseline", () => {
+  assert.strictEqual(seedLo(null), 0.35);
+  assert.ok(Math.abs(seedLo(0.7) - 0.5) < 1e-9);
 });
 
 test("window: RingBuffer slices absolute sample ranges and zero-fills the evicted", () => {
