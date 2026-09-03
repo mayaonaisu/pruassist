@@ -5,6 +5,17 @@ import { CANONICAL_TERMS } from "./terms";
 import { createResampler, floatTo16BitPCM } from "./pcm";
 import { DIARIZE_PARAMS, type DiarizedWord } from "./diarize";
 import { type DeepgramStatus } from "./useDeepgramSpeech";
+import { getAudioContext, ensurePcmWorklet, unlockAudio } from "./audio-context";
+
+// unlockAudio moved to audio-context.ts (shared with the enrolment mic); re-exported here so the
+// existing `import { unlockAudio } from "@/lib/useDiarizedSpeech"` call sites keep compiling.
+export { unlockAudio };
+
+// A tap on the exact 16 kHz float audio being streamed to Deepgram, for the voiceprint scorer. It gets
+// the frame BEFORE Int16 encoding (the model wants floats), the stream time in seconds on Deepgram's
+// own clock (frames sent × 0.1 s, reset at every socket.onopen), and an `epoch` that increments on each
+// reconnect — so a run's word times (which also restart at reconnect) can be matched to the right audio.
+export type PcmTap = (frame: Float32Array, streamTimeSec: number, epoch: number) => void;
 
 // Live diarized speech-to-text for IN-PERSON mode: one shared iPad microphone, two speakers, one
 // Deepgram stream that tags every word with a speaker index. A parallel to useDeepgramSpeech, NOT an
@@ -30,29 +41,6 @@ const MAX_RECONNECTS = 5;
 const CONNECT_DEADLINE_MS = 8000;
 const FRAME = 1600; // 100 ms of 16 kHz mono → 3200 bytes per WS send
 
-// A single AudioContext shared across the hook's lifetime. Created/resumed synchronously from a user
-// gesture via unlockAudio() (Safari suspends contexts created outside a gesture), then reused.
-let sharedCtx: AudioContext | null = null;
-let workletAdded = false;
-
-function audioContext(): AudioContext | null {
-  try {
-    const Ctor = (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext
-      ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return null;
-    if (!sharedCtx) sharedCtx = new Ctor();
-    return sharedCtx;
-  } catch {
-    return null;
-  }
-}
-
-/** Call from the "Begin" tap: creates/resumes the shared AudioContext while a user gesture is active. */
-export function unlockAudio(): void {
-  const ctx = audioContext();
-  if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
-}
-
 function concatF32(a: Float32Array, b: Float32Array): Float32Array {
   if (a.length === 0) return b;
   const out = new Float32Array(a.length + b.length);
@@ -64,10 +52,18 @@ function concatF32(a: Float32Array, b: Float32Array): Float32Array {
 export function useDiarizedSpeech(
   enabled: boolean,
   onResult: (r: DiarizedResult) => void,
+  opts?: { onPcm?: PcmTap },
 ): { status: DeepgramStatus; micPaused: boolean } {
   const cbRef = useRef(onResult);
   useEffect(() => {
     cbRef.current = onResult;
+  });
+
+  // Held in a ref so passing a fresh onPcm never restarts the capture effect (whose only dep is
+  // `enabled`). Unset ⇒ nothing changes; the tap is a no-op.
+  const pcmTapRef = useRef(opts?.onPcm);
+  useEffect(() => {
+    pcmTapRef.current = opts?.onPcm;
   });
 
   const [status, setStatus] = useState<DeepgramStatus>("idle");
@@ -90,6 +86,11 @@ export function useDiarizedSpeech(
     let opened = false;
     let pending: Float32Array = new Float32Array(0);
     let resampler: { push(chunk: Float32Array): Float32Array } | null = null;
+    // Deepgram's word timestamps restart at each socket.onopen, so the voice tap's clock must too:
+    // framesSent × 0.1 s is the seconds-of-audio-sent on THIS connection, and epoch bumps per open so
+    // evidence from a previous connection is never matched against a new run's times.
+    let framesSent = 0;
+    let epoch = 0;
 
     const armGiveUp = () => {
       if (giveUpTimer) clearTimeout(giveUpTimer);
@@ -156,17 +157,14 @@ export function useDiarizedSpeech(
       if (stopped) return;
 
       // 3) Audio graph. Resume the shared context (Safari) and register the worklet once.
-      const ctx = audioContext();
+      const ctx = getAudioContext();
       if (!ctx || !ctx.audioWorklet) {
         setStatus("unconfigured"); // no Web Audio / AudioWorklet — fall back
         return;
       }
       try {
         if (ctx.state === "suspended") await ctx.resume();
-        if (!workletAdded) {
-          await ctx.audioWorklet.addModule("/pcm-worklet.js");
-          workletAdded = true;
-        }
+        await ensurePcmWorklet(ctx);
       } catch {
         setStatus("error");
         return;
@@ -186,6 +184,9 @@ export function useDiarizedSpeech(
         attempts = 0;
         opened = true;
         deadlineRef.current = null;
+        // New connection ⇒ Deepgram's word clock restarts at 0, so the tap clock and epoch do too.
+        framesSent = 0;
+        epoch++;
         setStatus("listening");
 
         source = ctx.createMediaStreamSource(stream!);
@@ -200,7 +201,14 @@ export function useDiarizedSpeech(
           if (!resampler || socket.readyState !== WebSocket.OPEN) return;
           pending = concatF32(pending, resampler.push(new Float32Array(e.data as ArrayBuffer)));
           while (pending.length >= FRAME) {
-            socket.send(floatTo16BitPCM(pending.subarray(0, FRAME)));
+            const frame = pending.subarray(0, FRAME);
+            socket.send(floatTo16BitPCM(frame));
+            // Feed the voiceprint scorer the SAME frame (as floats), stamped on Deepgram's clock. A
+            // fresh copy because the tap may transfer the buffer to a worker; counting only frames
+            // actually sent keeps this clock identical to the word timestamps.
+            const tap = pcmTapRef.current;
+            if (tap) tap(new Float32Array(frame), framesSent * 0.1, epoch);
+            framesSent++;
             pending = pending.slice(FRAME);
           }
         };
