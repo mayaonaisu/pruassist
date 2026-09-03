@@ -10,6 +10,7 @@ import { useConsent } from "@/lib/useConsent";
 import { usePointers } from "@/lib/usePointers";
 import { useTranscript } from "@/lib/useTranscript";
 import { useInPersonSpeech } from "@/lib/useInPersonSpeech";
+import type { VoiceLogEntry } from "@/lib/voice-log";
 import { useVoiceProfile } from "@/lib/useVoiceProfile";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { unlockAudio } from "@/lib/useDiarizedSpeech";
@@ -20,6 +21,16 @@ import { thresholdFor } from "@/lib/voice/calibration";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
 
 const ZERO_STATS: Stats = { surfaced: 0, used: 0, flags: 0, docs: 0 };
+
+function debugTime(at: number, startedAt: number): string {
+  const elapsed = Math.max(0, Math.floor((at - startedAt) / 1000));
+  return `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+}
+
+function debugNumber(value: number | null, digits: number, signed = false): string {
+  if (value == null) return "–";
+  return `${signed && value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
 
 // The customer-facing whiteboard is loaded lazily and client-only, so pdfjs never enters the rep view's
 // chunk or runs on the server.
@@ -173,17 +184,27 @@ function InPersonConsole({
   // synchronously in the effect.
   const [liveScore, setLiveScore] = useState<number | null>(null);
   const [liveCust, setLiveCust] = useState<number | null>(null);
+  const [voiceDebug, setVoiceDebug] = useState(false);
+  const [voiceRows, setVoiceRows] = useState<readonly VoiceLogEntry[]>([]);
   const voiceReady = speech.engine === "deepgram" && speech.voiceStatus === "ready";
   const liveScoreFn = speech.liveScore;
   const liveCustFn = speech.liveCustScore;
+  const voiceLogFn = speech.voiceLog;
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setVoiceDebug(new URLSearchParams(window.location.search).get("voicedebug") === "1");
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
   useEffect(() => {
     if (!voiceReady || sharing) return;
     const t = setInterval(() => {
       setLiveScore(liveScoreFn());
       setLiveCust(liveCustFn());
+      if (voiceDebug) setVoiceRows(voiceLogFn().slice(-12));
     }, 250);
     return () => clearInterval(t);
-  }, [voiceReady, sharing, liveScoreFn, liveCustFn]);
+  }, [voiceReady, sharing, liveScoreFn, liveCustFn, voiceDebug, voiceLogFn]);
 
   const [startedAt, setStartedAt] = useState(0);
   const startRef = useRef(0);
@@ -384,44 +405,77 @@ function InPersonConsole({
           enough, attribution decides by which voice is closer (the gap) and the slider is just the
           fallback used until then. Rep view only, hidden from the customer while sharing. */}
       {!sharing && voiceReady && (
-        <div className="voice-tune" role="group" aria-label="Voice match sensitivity">
-          <span className="voice-tune-label">Voice match</span>
-          <button type="button" className="voice-tune-reset" onClick={resetThreshold}>reset</button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={voiceThreshold}
-            onChange={(e) => changeThreshold(parseFloat(e.target.value))}
-            className="voice-slider"
-            title="Fallback threshold, used until the customer's voice is learned"
-            aria-label="Voice match fallback threshold"
-          />
-          <span
-            className={`voice-meter voice-tune-meter ${
-              liveScore == null
-                ? ""
-                : liveCust != null
-                  ? liveScore - liveCust >= DEFAULT_ATTRIBUTE_OPTS.voiceMargin
-                    ? "voice-meter-hi"
-                    : liveCust - liveScore >= DEFAULT_ATTRIBUTE_OPTS.voiceMargin
-                      ? "voice-meter-lo"
-                      : "voice-meter-mid"
-                  : liveScore >= voiceThreshold
-                    ? "voice-meter-hi"
-                    : liveScore <= voiceThreshold - 0.2
-                      ? "voice-meter-lo"
-                      : "voice-meter-mid"
-            }`}
-            aria-hidden
-          >
-            <div className="voice-meter-fill" style={{ width: `${liveScore == null ? 0 : Math.round(((liveScore + 1) / 2) * 100)}%` }} />
-          </span>
-          <span className="voice-tune-live">
-            {liveScore == null ? "listening…" : `you ${liveScore.toFixed(2)} · cust ${liveCust != null ? liveCust.toFixed(2) : "learning…"}`}
-          </span>
-        </div>
+        <>
+          <div className="voice-tune" role="group" aria-label="Voice match sensitivity">
+            <span className="voice-tune-label">Voice match</span>
+            <button type="button" className="voice-tune-reset" onClick={resetThreshold}>reset</button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={voiceThreshold}
+              onChange={(e) => changeThreshold(parseFloat(e.target.value))}
+              className="voice-slider"
+              title="Fallback threshold, used until the customer's voice is learned"
+              aria-label="Voice match fallback threshold"
+            />
+            <span
+              className={`voice-meter voice-tune-meter ${
+                liveScore == null
+                  ? ""
+                  : liveCust != null
+                    ? liveScore - liveCust >= DEFAULT_ATTRIBUTE_OPTS.voiceMargin
+                      ? "voice-meter-hi"
+                      : liveCust - liveScore >= DEFAULT_ATTRIBUTE_OPTS.voiceMargin
+                        ? "voice-meter-lo"
+                        : "voice-meter-mid"
+                    : liveScore >= voiceThreshold
+                      ? "voice-meter-hi"
+                      : liveScore <= voiceThreshold - 0.2
+                        ? "voice-meter-lo"
+                        : "voice-meter-mid"
+              }`}
+              aria-hidden
+            >
+              <div className="voice-meter-fill" style={{ width: `${liveScore == null ? 0 : Math.round(((liveScore + 1) / 2) * 100)}%` }} />
+            </span>
+            <span className="voice-tune-live">
+              {liveScore == null ? "listening…" : `you ${liveScore.toFixed(2)} · cust ${liveCust != null ? liveCust.toFixed(2) : "learning…"}`}
+            </span>
+          </div>
+          {voiceDebug && (
+            <section className="voice-debug" aria-label="Voice decision log">
+              <div className="voice-debug-head">
+                <span>Voice decisions</span>
+                <span>in memory only — nothing here is saved</span>
+              </div>
+              <div className="voice-debug-scroll">
+                <table>
+                  <thead>
+                    <tr><th>t</th><th>idx</th><th>sec</th><th>you</th><th>cust</th><th>gap</th><th>role</th><th>src</th><th>ms</th><th>text</th></tr>
+                  </thead>
+                  <tbody>
+                    {voiceRows.map((row, index) => (
+                      <tr key={`${row.at}-${row.idx}-${index}`}>
+                        <td>{debugTime(row.at, startedAt)}</td>
+                        <td>{row.idx}</td>
+                        <td>{debugNumber(row.sec, 1)}</td>
+                        <td>{debugNumber(row.mean, 2)}</td>
+                        <td>{debugNumber(row.custMean, 2)}</td>
+                        <td>{debugNumber(row.gap, 2, true)}</td>
+                        <td>{row.role === "rep" ? "You" : displayName.split(/\s+/)[0]}</td>
+                        <td className={`voice-debug-source source-${row.source}`}>{row.source}</td>
+                        <td>{row.ms}</td>
+                        <td title={row.text}>{row.text.slice(0, 28)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+        </>
       )}
 
       {/* While sharing, the customer sees this rail — keep only the mic-paused honesty note, not the
