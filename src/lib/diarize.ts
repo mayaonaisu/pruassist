@@ -62,7 +62,7 @@ export function splitRuns(words: DiarizedWord[] | undefined): SpeakerRun[] {
 // against the session's learned CUSTOMER centroid, present only once that centroid has been seeded — so
 // attribution can decide by which voice a run is CLOSER to (a margin), which is robust to loudness / mic
 // distance / room in a way an absolute threshold is not.
-export type VoiceEvidence = { mean: number; n: number; custMean?: number | null; custN?: number };
+export type VoiceEvidence = { mean: number; n: number; sec?: number; custMean?: number | null; custN?: number };
 
 // Text-cue votes for one run (see speaker-cues.ts). Summed across an index's runs before deciding.
 export type TextCue = { repVotes: number; customerVotes: number };
@@ -72,7 +72,14 @@ export type SpeakerEvidence = { voice?: VoiceEvidence | null; text?: TextCue | n
 
 // Accumulated evidence for one speaker index across the runs seen so far. custSum/custN accumulate the
 // customer-centroid similarity, parallel to voiceSum/voiceN for the rep.
-export type SpeakerStats = { voiceSum: number; voiceN: number; custSum: number; custN: number; textRep: number; textCust: number; runs: number };
+export type SpeakerStats = {
+  voiceSum: number; voiceN: number; custSum: number; custN: number; textRep: number; textCust: number; runs: number;
+  voiceRecent: number[];
+  custRecent: (number | null)[];
+  contrary: number;
+};
+
+export type LineSource = "override" | "voice-strong" | "voice-index" | "text" | "prior" | "default";
 
 // The learned binding index → role. `firm` marks a binding made by voice or the manual override, which
 // text and the no-evidence default may never overwrite; a provisional binding (text/default) may. `stats`
@@ -82,10 +89,11 @@ export type SpeakerMap = {
   firm: Record<number, boolean>;
   stats: Record<number, SpeakerStats>;
   calibrated: boolean;
+  lastRole?: Role | null;
 };
 
 export function emptySpeakerMap(): SpeakerMap {
-  return { assigned: {}, firm: {}, stats: {}, calibrated: false };
+  return { assigned: {}, firm: {}, stats: {}, calibrated: false, lastRole: null };
 }
 
 // Thresholds. voiceHi/Lo bracket the cosine similarity that counts as rep/customer BEFORE a customer
@@ -94,8 +102,16 @@ export function emptySpeakerMap(): SpeakerMap {
 // scored windows a verdict needs; flipMinN is the (larger) count needed to overturn a FIRM binding
 // (hysteresis); textMargin is the vote gap a text verdict needs. The 0.5 / 0.3 absolute guidance is the
 // reference package's; the relative margin is what the "test your voice" / in-console meters help tune.
-export type AttributeOpts = { voiceHi: number; voiceLo: number; voiceMargin: number; voiceMinN: number; flipMinN: number; textMargin: number };
-export const DEFAULT_ATTRIBUTE_OPTS: AttributeOpts = { voiceHi: 0.5, voiceLo: 0.3, voiceMargin: 0.05, voiceMinN: 2, flipMinN: 4, textMargin: 2 };
+export type AttributeOpts = {
+  voiceHi: number; voiceLo: number; voiceMargin: number; strongMargin: number;
+  voiceMinN: number; minVoicedSec: number; recentK: number; flipMinN: number; flipRuns: number;
+  textMargin: number; engineReady: boolean;
+};
+export const DEFAULT_ATTRIBUTE_OPTS: AttributeOpts = {
+  voiceHi: 0.5, voiceLo: 0.3, voiceMargin: 0.05, strongMargin: 0.15,
+  voiceMinN: 1, minVoicedSec: 0.6, recentK: 6, flipMinN: 4, flipRuns: 2,
+  textMargin: 2, engineReady: false,
+};
 
 // The gap the in-person "Voice match" slider keeps between the rep threshold and the customer
 // threshold — the dead zone that stops one borderline window from flip-flapping the binding.
@@ -113,7 +129,10 @@ export function optsForThreshold(voiceHi: number, base: AttributeOpts = DEFAULT_
 export type Rebind = { speakerIndex: number; from: Role; to: Role };
 
 function emptyStats(): SpeakerStats {
-  return { voiceSum: 0, voiceN: 0, custSum: 0, custN: 0, textRep: 0, textCust: 0, runs: 0 };
+  return {
+    voiceSum: 0, voiceN: 0, custSum: 0, custN: 0, textRep: 0, textCust: 0, runs: 0,
+    voiceRecent: [], custRecent: [], contrary: 0,
+  };
 }
 
 /**
@@ -145,7 +164,7 @@ export function attributeFinal(
   evidence?: (run: SpeakerRun) => SpeakerEvidence,
   opts: AttributeOpts = DEFAULT_ATTRIBUTE_OPTS,
 ): {
-  lines: { role: Role; text: string; speakerIndex: number; provisional: boolean }[];
+  lines: { role: Role; text: string; speakerIndex: number; provisional: boolean; source: LineSource; gap: number | null }[];
   map: SpeakerMap;
   lastRole: Role | null;
   rebound: Rebind[];
@@ -153,10 +172,13 @@ export function attributeFinal(
   const assigned: Record<number, Role> = { ...map.assigned };
   const firm: Record<number, boolean> = { ...map.firm };
   const stats: Record<number, SpeakerStats> = {};
-  for (const k of Object.keys(map.stats)) stats[Number(k)] = { ...map.stats[Number(k)] };
+  for (const k of Object.keys(map.stats)) {
+    const prior = map.stats[Number(k)];
+    stats[Number(k)] = { ...prior, voiceRecent: [...prior.voiceRecent], custRecent: [...prior.custRecent] };
+  }
 
   const rebound: Rebind[] = [];
-  const lines: { role: Role; text: string; speakerIndex: number; provisional: boolean }[] = [];
+  const lines: { role: Role; text: string; speakerIndex: number; provisional: boolean; source: LineSource; gap: number | null }[] = [];
 
   const someRep = (): boolean => {
     for (const k of Object.keys(assigned)) if (assigned[Number(k)] === "rep") return true;
@@ -193,6 +215,10 @@ export function attributeFinal(
         s.custSum += ev.voice.custMean * ev.voice.custN;
         s.custN += ev.voice.custN;
       }
+      s.voiceRecent.push(ev.voice.mean);
+      s.custRecent.push(ev.voice.custMean ?? null);
+      s.voiceRecent = s.voiceRecent.slice(-opts.recentK);
+      s.custRecent = s.custRecent.slice(-opts.recentK);
     }
     if (ev?.text) {
       s.textRep += ev.text.repVotes;
@@ -201,57 +227,103 @@ export function attributeFinal(
 
     if (override !== null) {
       // Display forced. A single-run rebind is applied after the loop (today's semantics).
-      lines.push({ role: override, text: run.text, speakerIndex: idx, provisional: false });
+      const gap = ev?.voice ? (ev.voice.custMean != null ? ev.voice.mean - ev.voice.custMean : ev.voice.mean) : null;
+      lines.push({ role: override, text: run.text, speakerIndex: idx, provisional: false, source: "override", gap });
       continue;
     }
 
     const prior = assigned[idx];
     const priorFirm = firm[idx] ?? false;
 
-    let voiceRole: Role | null = null;
-    if (s.voiceN >= opts.voiceMinN) {
-      const repMean = s.voiceSum / s.voiceN;
-      if (s.custN > 0) {
-        // Relative decision: which voice is this index closer to? Robust to loudness / mic / room.
-        const gap = repMean - s.custSum / s.custN;
-        if (gap >= opts.voiceMargin) voiceRole = "rep";
-        else if (gap <= -opts.voiceMargin) voiceRole = "customer";
+    let runRole: Role | null = null;
+    let weakRole: Role | null = null;
+    const gap = ev?.voice ? (ev.voice.custMean != null ? ev.voice.mean - ev.voice.custMean : ev.voice.mean) : null;
+    if (ev?.voice && ev.voice.sec != null && ev.voice.sec >= opts.minVoicedSec) {
+      if (ev.voice.custMean != null) {
+        const runGap = ev.voice.mean - ev.voice.custMean;
+        if (Math.abs(runGap) >= opts.strongMargin) runRole = runGap > 0 ? "rep" : "customer";
+        else if (Math.abs(runGap) >= opts.voiceMargin) weakRole = runGap > 0 ? "rep" : "customer";
       } else {
-        // No customer centroid yet — fall back to the absolute threshold (the slider's value).
+        if (ev.voice.mean >= opts.voiceHi) runRole = "rep";
+        else if (ev.voice.mean <= opts.voiceLo) runRole = "customer";
+      }
+    }
+
+    if (runRole) {
+      if (prior === undefined || !priorFirm || prior === runRole) {
+        bind(idx, runRole, true);
+        s.contrary = 0;
+      } else {
+        s.contrary += 1;
+        if (s.contrary >= opts.flipRuns) {
+          bind(idx, runRole, true);
+          s.contrary = 0;
+        }
+      }
+      lines.push({ role: runRole, text: run.text, speakerIndex: idx, provisional: false, source: "voice-strong", gap });
+      continue;
+    }
+
+    let voiceRole: Role | null = null;
+    if (s.voiceRecent.length >= opts.voiceMinN) {
+      const repMean = s.voiceRecent.reduce((sum, value) => sum + value, 0) / s.voiceRecent.length;
+      if (s.custRecent.every((value) => value !== null)) {
+        const custMean = (s.custRecent as number[]).reduce((sum, value) => sum + value, 0) / s.custRecent.length;
+        const recentGap = repMean - custMean;
+        if (recentGap >= opts.voiceMargin) voiceRole = "rep";
+        else if (recentGap <= -opts.voiceMargin) voiceRole = "customer";
+      } else {
         if (repMean >= opts.voiceHi) voiceRole = "rep";
         else if (repMean <= opts.voiceLo) voiceRole = "customer";
       }
     }
+    voiceRole ??= weakRole;
     let textRole: Role | null = null;
     const d = s.textRep - s.textCust;
     if (Math.abs(d) >= opts.textMargin) textRole = d > 0 ? "rep" : "customer";
 
     let role: Role;
+    let source: LineSource;
+    let provisional: boolean;
     if (voiceRole) {
       if (prior === undefined || !priorFirm) {
-        bind(idx, voiceRole, true);
+        const firmFromMemory = s.voiceRecent.length >= 2 || (ev?.voice?.sec == null && s.voiceN >= 2);
+        bind(idx, voiceRole, firmFromMemory);
         role = voiceRole;
-      } else if (voiceRole !== prior && s.voiceN >= opts.flipMinN) {
+        source = "voice-index";
+      } else if (voiceRole !== prior && ev?.voice?.sec == null && s.voiceN >= opts.flipMinN) {
         bind(idx, voiceRole, true); // sustained contrary run clears hysteresis and flips a firm binding
         role = voiceRole;
+        source = "voice-index";
       } else {
         role = prior; // one contrary window cannot flap a firm binding
+        source = voiceRole === prior ? "voice-index" : "prior";
       }
+      provisional = !(firm[idx] ?? false);
     } else if (textRole) {
       if (prior === undefined || !priorFirm) {
         bind(idx, textRole, false); // provisional — text can start or move a guess, never firm one
         role = textRole;
+        source = "text";
       } else {
         role = prior; // text never overrides a firm (voice / override) binding
+        source = "prior";
       }
+      provisional = !(firm[idx] ?? false);
     } else if (prior !== undefined) {
       role = prior;
+      source = "prior";
+      provisional = !priorFirm;
     } else {
-      role = someRep() ? "customer" : "rep";
+      const lastRoleSoFar = lines.length ? lines[lines.length - 1].role : map.lastRole ?? null;
+      // With a voiceprint loaded and no rep-like evidence, a missed rep line is the safer, reversible error.
+      role = opts.engineReady ? (lastRoleSoFar ?? "customer") : (someRep() ? "customer" : "rep");
       bind(idx, role, false); // rep-first default, but provisional and self-correcting
+      source = "default";
+      provisional = true;
     }
 
-    lines.push({ role, text: run.text, speakerIndex: idx, provisional: !(firm[idx] ?? false) });
+    lines.push({ role, text: run.text, speakerIndex: idx, provisional, source, gap });
   }
 
   if (override !== null && runs.length === 1) {
@@ -269,8 +341,8 @@ export function attributeFinal(
     }
   }
 
-  const lastRole = lines.length ? lines[lines.length - 1].role : null;
-  return { lines, map: { assigned, firm, stats, calibrated }, lastRole, rebound };
+  const lastRole = lines.length ? lines[lines.length - 1].role : map.lastRole ?? null;
+  return { lines, map: { assigned, firm, stats, calibrated, lastRole }, lastRole, rebound };
 }
 
 /* ---------- provisional relabel bookkeeping ---------- */

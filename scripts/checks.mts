@@ -43,7 +43,7 @@ const { detectAssent, detectDivergence, detectLatency, detectRaised, detectReAsk
 const { unsupportedFigures } = await import("../src/lib/agent/verify.ts");
 const { emptyState } = await import("../src/lib/agent/types.ts");
 const { lastFromCustomer, newestAt, toTurns, windowToSend, applyLineEdit, applySpeakerSwap, groupCitations } = await import("../src/lib/transcript.ts");
-const { splitRuns, emptySpeakerMap, attributeFinal, interimRole, noteProvisional, relabelPlan, optsForThreshold, VOICE_DEADZONE } = await import("../src/lib/diarize.ts");
+const { splitRuns, emptySpeakerMap, attributeFinal, interimRole, noteProvisional, relabelPlan, optsForThreshold, VOICE_DEADZONE, DEFAULT_ATTRIBUTE_OPTS } = await import("../src/lib/diarize.ts");
 const { textCue } = await import("../src/lib/speaker-cues.ts");
 const { pushSample, scoreBetween, recentVerdict } = await import("../src/lib/voice-ring.ts");
 // Voice feature/window maths are pure and safe to import here; engine.ts (onnxruntime-web) is NOT.
@@ -1148,7 +1148,10 @@ const word = (w: string, speaker: number | undefined, punct?: string) =>
 // A run with explicit word times, for evidence windows keyed on [start, end].
 const run = (speakerIndex: number, text: string, start = 0, end = 0) => ({ speakerIndex, text, start, end });
 
-const emptyStats = () => ({ voiceSum: 0, voiceN: 0, custSum: 0, custN: 0, textRep: 0, textCust: 0, runs: 0 });
+const emptyStats = () => ({
+  voiceSum: 0, voiceN: 0, custSum: 0, custN: 0, textRep: 0, textCust: 0, runs: 0,
+  voiceRecent: [] as number[], custRecent: [] as (number | null)[], contrary: 0,
+});
 // A firmly-bound SpeakerMap for tests that start mid-session (post-calibration), replacing the old
 // `{ assigned, calibrated }` literals now that the map carries `firm` and `stats` too.
 const bindMap = (roles: Record<number, "rep" | "customer">) => {
@@ -1163,7 +1166,7 @@ const bindMap = (roles: Record<number, "rep" | "customer">) => {
     stats[j] = emptyStats();
     if (roles[j] === "rep") hasRep = true;
   }
-  return { assigned, firm, stats, calibrated: hasRep };
+  return { assigned, firm, stats, calibrated: hasRep, lastRole: null };
 };
 
 test("splitRuns: splits a diarized final into one line-run per consecutive speaker", () => {
@@ -1192,7 +1195,7 @@ test("splitRuns: prefers punctuated_word over word", () => {
   assert.strictEqual(runs[0].text, "Hello, there.");
 });
 
-test("attributeFinal: first index binds to rep only when no evidence exists (rep-first default)", () => {
+test("attributeFinal: first index binds to rep only when no evidence exists and the engine is off", () => {
   const r = attributeFinal(emptySpeakerMap(), splitRuns([word("welcome", 0)]), null);
   assert.strictEqual(r.lines[0].role, "rep");
   assert.strictEqual(r.lines[0].provisional, true); // now provisional, not a hard calibration anchor
@@ -1239,7 +1242,8 @@ test("attributeFinal: voice below voiceMinN falls through to text cues", () => {
   // n=1 < voiceMinN(2): no voice verdict. A customer text margin then binds provisionally to customer —
   // a first index with no evidence would have defaulted to REP, so this proves text decided it.
   const r = attributeFinal(emptySpeakerMap(), [run(0, "x", 0, 1)], null,
-    () => ({ voice: { mean: 0.9, n: 1 }, text: { repVotes: 0, customerVotes: 2 } }));
+    () => ({ voice: { mean: 0.9, n: 1 }, text: { repVotes: 0, customerVotes: 2 } }),
+    { ...DEFAULT_ATTRIBUTE_OPTS, voiceMinN: 2 });
   assert.strictEqual(r.lines[0].role, "customer");
   assert.strictEqual(r.lines[0].provisional, true);
   assert.strictEqual(r.map.firm[0], false);
@@ -1287,7 +1291,9 @@ test("optsForThreshold: maps the slider value to voiceHi and a dead-zone voiceLo
   const mid = optsForThreshold(0.5);
   assert.strictEqual(mid.voiceHi, 0.5);
   assert.ok(Math.abs(mid.voiceLo - (0.5 - VOICE_DEADZONE)) < 1e-9);
-  assert.strictEqual(mid.voiceMinN, 2); // other fields preserved from the base
+  assert.strictEqual(mid.voiceMinN, 1); // other fields preserved from the base
+  assert.strictEqual(mid.strongMargin, DEFAULT_ATTRIBUTE_OPTS.strongMargin);
+  assert.strictEqual(mid.engineReady, DEFAULT_ATTRIBUTE_OPTS.engineReady);
   const low = optsForThreshold(0.35);
   assert.ok(Math.abs(low.voiceHi - 0.35) < 1e-9);
   assert.ok(Math.abs(low.voiceLo - 0.15) < 1e-9);
@@ -1309,6 +1315,72 @@ test("attributeFinal: a run within the margin of both voices gets no voice verdi
   const r = attributeFinal(emptySpeakerMap(), [run(0, "x", 0, 3)], null, () => ({ voice: { mean: 0.5, n: 2, custMean: 0.48, custN: 2 } }));
   assert.strictEqual(r.lines[0].role, "rep"); // gap 0.02 < margin 0.05 → no voice verdict → rep-first default
   assert.strictEqual(r.lines[0].provisional, true); // a default, not a firm voice binding
+});
+
+test("attributeFinal: a decisive run binds firmly from its own voice evidence", () => {
+  const r = attributeFinal(emptySpeakerMap(), [run(3, "hello")], null,
+    () => ({ voice: { mean: 0.2, n: 1, sec: 1, custMean: 0.7, custN: 1 } }));
+  assert.strictEqual(r.lines[0].role, "customer");
+  assert.strictEqual(r.lines[0].source, "voice-strong");
+  assert.ok(Math.abs((r.lines[0].gap ?? 0) + 0.5) < 1e-9);
+  assert.strictEqual(r.map.firm[3], true);
+});
+
+test("attributeFinal: two consecutive decisive contrary runs flip a firm binding", () => {
+  const opts = { ...DEFAULT_ATTRIBUTE_OPTS, flipRuns: 2 };
+  const evidence = () => ({ voice: { mean: 0.2, n: 1, sec: 1, custMean: 0.7, custN: 1 } });
+  const first = attributeFinal(bindMap({ 0: "rep" }), [run(0, "one")], null, evidence, opts);
+  assert.strictEqual(first.lines[0].role, "customer");
+  assert.strictEqual(first.map.assigned[0], "rep");
+  assert.deepStrictEqual(first.rebound, []);
+  const second = attributeFinal(first.map, [run(0, "two")], null, evidence, opts);
+  assert.strictEqual(second.map.assigned[0], "customer");
+  assert.deepStrictEqual(second.rebound, [{ speakerIndex: 0, from: "rep", to: "customer" }]);
+});
+
+test("attributeFinal: an agreeing decisive run resets the contrary run count", () => {
+  const opts = { ...DEFAULT_ATTRIBUTE_OPTS, flipRuns: 2 };
+  const score = (mean: number, custMean: number) => () => ({ voice: { mean, n: 1, sec: 1, custMean, custN: 1 } });
+  const contrary = attributeFinal(bindMap({ 0: "rep" }), [run(0, "one")], null, score(0.2, 0.7), opts);
+  const agree = attributeFinal(contrary.map, [run(0, "two")], null, score(0.8, 0.2), opts);
+  const again = attributeFinal(agree.map, [run(0, "three")], null, score(0.2, 0.7), opts);
+  assert.strictEqual(again.map.assigned[0], "rep");
+  assert.strictEqual(again.map.stats[0].contrary, 1);
+  assert.deepStrictEqual(again.rebound, []);
+});
+
+test("attributeFinal: a short run skips the run verdict but feeds provisional index memory", () => {
+  const r = attributeFinal(emptySpeakerMap(), [run(0, "short")], null,
+    () => ({ voice: { mean: 0.2, n: 1, sec: 0.4, custMean: 0.7, custN: 1 } }),
+    { ...DEFAULT_ATTRIBUTE_OPTS, voiceMinN: 1 });
+  assert.strictEqual(r.lines[0].role, "customer");
+  assert.strictEqual(r.lines[0].source, "voice-index");
+  assert.strictEqual(r.lines[0].provisional, true);
+});
+
+test("attributeFinal: a weak run becomes a provisional index-memory verdict", () => {
+  const r = attributeFinal(emptySpeakerMap(), [run(0, "weak")], null,
+    () => ({ voice: { mean: 0.58, n: 1, sec: 1, custMean: 0.5, custN: 1 } }));
+  assert.strictEqual(r.lines[0].role, "rep");
+  assert.strictEqual(r.lines[0].source, "voice-index");
+  assert.strictEqual(r.lines[0].provisional, true);
+});
+
+test("attributeFinal: engine-ready defaults to customer then preserves role continuity", () => {
+  const opts = { ...DEFAULT_ATTRIBUTE_OPTS, engineReady: true };
+  const first = attributeFinal(emptySpeakerMap(), [run(0, "ambiguous")], null, undefined, opts);
+  assert.strictEqual(first.lines[0].role, "customer");
+  assert.strictEqual(first.lines[0].source, "default");
+
+  const sameFinal = attributeFinal(emptySpeakerMap(), [run(0, "rep cue"), run(1, "ambiguous")], null,
+    (r) => r.speakerIndex === 0 ? { text: { repVotes: 2, customerVotes: 0 } } : {}, opts);
+  assert.deepStrictEqual(sameFinal.lines.map((line) => line.role), ["rep", "rep"]);
+  assert.strictEqual(sameFinal.lines[1].source, "default");
+
+  const prior = attributeFinal(bindMap({ 0: "rep" }), [run(0, "known")], null, undefined, opts);
+  const next = attributeFinal(prior.map, [run(1, "new")], null, undefined, opts);
+  assert.strictEqual(next.lines[0].role, "rep");
+  assert.strictEqual(next.lines[0].source, "default");
 });
 
 test("interimRole: override, else live voice, else last final, else rep", () => {
