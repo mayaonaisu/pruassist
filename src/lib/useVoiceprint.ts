@@ -43,21 +43,41 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
   useEffect(() => {
     if (!active || !profile) return; // status derives to "off"
     ringRef.current = [];
-    const worker = new Worker(new URL("./voice/voice.worker.ts", import.meta.url), { type: "module" });
+    // The voiceprint is an OPTIONAL enhancement: any failure here must degrade to "error" (→ text cues
+    // + toggle), never throw out of the effect (which would unmount the console and blank the transcript).
+    // Defer error-state updates out of the synchronous effect body (queueMicrotask) — the async worker
+    // handlers below may call setOutcome directly.
+    const fail = () => queueMicrotask(() => setOutcome("error"));
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./voice/voice.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      fail();
+      return;
+    }
     workerRef.current = worker;
+    worker.onerror = () => setOutcome("error");
     worker.onmessage = (e: MessageEvent<WorkerOut>) => {
-      const msg = e.data;
-      if (msg.type === "ready") {
-        const copy = profile.slice(); // transfer a copy; the prop's buffer stays intact
-        worker.postMessage({ type: "profile", embedding: copy }, [copy.buffer]);
-        setOutcome("ready");
-      } else if (msg.type === "score") {
-        ringRef.current = pushSample(ringRef.current, { epoch: msg.epoch, t0: msg.t0, t1: msg.t1, score: msg.score });
-      } else if (msg.type === "error") {
+      try {
+        const msg = e.data;
+        if (msg.type === "ready") {
+          const copy = profile.slice(); // transfer a copy; the prop's buffer stays intact
+          worker.postMessage({ type: "profile", embedding: copy }, [copy.buffer]);
+          setOutcome("ready");
+        } else if (msg.type === "score") {
+          ringRef.current = pushSample(ringRef.current, { epoch: msg.epoch, t0: msg.t0, t1: msg.t1, score: msg.score });
+        } else if (msg.type === "error") {
+          setOutcome("error");
+        }
+      } catch {
         setOutcome("error");
       }
     };
-    worker.postMessage({ type: "init", modelUrl: VOICE_MODEL_URL });
+    try {
+      worker.postMessage({ type: "init", modelUrl: VOICE_MODEL_URL });
+    } catch {
+      fail();
+    }
     return () => {
       try {
         worker.terminate();
@@ -76,7 +96,11 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
     lastTSecRef.current = streamTimeSec;
     const worker = workerRef.current;
     if (!worker) return;
-    worker.postMessage({ type: "pcm", frame, epoch, tSec: streamTimeSec }, [frame.buffer]);
+    try {
+      worker.postMessage({ type: "pcm", frame, epoch, tSec: streamTimeSec }, [frame.buffer]);
+    } catch {
+      /* posting to the worker must never break the capture tap */
+    }
   }, []);
 
   const scoreBetween = useCallback(

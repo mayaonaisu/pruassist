@@ -201,15 +201,23 @@ export function useDiarizedSpeech(
           if (!resampler || socket.readyState !== WebSocket.OPEN) return;
           pending = concatF32(pending, resampler.push(new Float32Array(e.data as ArrayBuffer)));
           while (pending.length >= FRAME) {
-            const frame = pending.subarray(0, FRAME);
-            socket.send(floatTo16BitPCM(frame));
-            // Feed the voiceprint scorer the SAME frame (as floats), stamped on Deepgram's clock. A
-            // fresh copy because the tap may transfer the buffer to a worker; counting only frames
-            // actually sent keeps this clock identical to the word timestamps.
-            const tap = pcmTapRef.current;
-            if (tap) tap(new Float32Array(frame), framesSent * 0.1, epoch);
-            framesSent++;
+            // Own buffer (a copy of the view), so the voiceprint tap may transfer it freely.
+            const frame = new Float32Array(pending.subarray(0, FRAME));
+            // Advance the queue BEFORE anything that could throw — otherwise a throw would leave
+            // pending undrained and spin this loop forever, wedging capture. This is load-bearing.
             pending = pending.slice(FRAME);
+            socket.send(floatTo16BitPCM(frame));
+            // Feed the voiceprint scorer the SAME frame (as floats), stamped on Deepgram's clock, but
+            // NEVER let it break capture: a throw here must not stop sends to Deepgram or wedge the loop.
+            const tap = pcmTapRef.current;
+            if (tap) {
+              try {
+                tap(frame, framesSent * 0.1, epoch);
+              } catch {
+                /* voiceprint tap failure is isolated — capture continues */
+              }
+            }
+            framesSent++;
           }
         };
 

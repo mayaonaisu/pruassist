@@ -104,46 +104,63 @@ export function useInPersonSpeech(
   // interims use the override, the live voice verdict, then the last final's role.
   const onDiarized = useCallback(
     (r: DiarizedResult) => {
+      // The voiceprint is an optional signal; it must never throw into the transcript path. These
+      // wrappers guarantee the customer's words are emitted even if scoring ever fails.
+      const safeVerdict = (): Role | null => {
+        try {
+          return vpVerdict();
+        } catch {
+          return null;
+        }
+      };
       if (r.isFinal) {
         const runs = splitRuns(r.words.length ? r.words : undefined);
         if (runs.length === 0) {
           // No diarized words (diarize hiccup / metadata) — attribute the whole line to the current
           // role rather than dropping it.
-          const role = interimRole(overrideRef.current, lastFinalRoleRef.current, vpVerdict());
+          const role = interimRole(overrideRef.current, lastFinalRoleRef.current, safeVerdict());
           if (r.transcript) {
             emit(role, r.transcript);
             lastFinalRoleRef.current = role;
             setActiveRoleState(overrideRef.current ?? role);
           }
         } else {
-          const evidence = (run: { speakerIndex: number; text: string; start: number; end: number }) => ({
-            voice: vpScore(epochRef.current, run.start, run.end),
-            text: textCue(run.text, { repName, customerName }),
-          });
-          const res = attributeFinal(mapRef.current, runs, overrideRef.current, evidence);
-          mapRef.current = res.map;
-          const now = Date.now();
-          for (const line of res.lines) {
-            const id = emit(line.role, line.text);
-            // Book a provisional (non-firm, auto) line so a later firm rebind can relabel it.
-            if (id && line.provisional && overrideRef.current === null) {
-              bookRef.current = noteProvisional(bookRef.current, line.speakerIndex, id, now);
+          try {
+            const evidence = (run: { speakerIndex: number; text: string; start: number; end: number }) => ({
+              voice: vpScore(epochRef.current, run.start, run.end),
+              text: textCue(run.text, { repName, customerName }),
+            });
+            const res = attributeFinal(mapRef.current, runs, overrideRef.current, evidence);
+            mapRef.current = res.map;
+            const now = Date.now();
+            for (const line of res.lines) {
+              const id = emit(line.role, line.text);
+              // Book a provisional (non-firm, auto) line so a later firm rebind can relabel it.
+              if (id && line.provisional && overrideRef.current === null) {
+                bookRef.current = noteProvisional(bookRef.current, line.speakerIndex, id, now);
+              }
             }
-          }
-          if (res.rebound.length) {
-            const plan = relabelPlan(bookRef.current, res.rebound, now);
-            bookRef.current = plan.book;
-            for (const id of plan.swapIds) store.swapLocalSpeaker(id, repName, customerName);
-          }
-          if (res.lastRole) {
-            lastFinalRoleRef.current = res.lastRole;
-            setActiveRoleState(overrideRef.current ?? res.lastRole);
+            if (res.rebound.length) {
+              const plan = relabelPlan(bookRef.current, res.rebound, now);
+              bookRef.current = plan.book;
+              for (const id of plan.swapIds) store.swapLocalSpeaker(id, repName, customerName);
+            }
+            if (res.lastRole) {
+              lastFinalRoleRef.current = res.lastRole;
+              setActiveRoleState(overrideRef.current ?? res.lastRole);
+            }
+          } catch {
+            // Attribution failed — never drop the words. Emit each run under the current best role.
+            const role = interimRole(overrideRef.current, lastFinalRoleRef.current, null);
+            for (const run of runs) if (run.text) emit(role, run.text);
+            lastFinalRoleRef.current = role;
+            setActiveRoleState(overrideRef.current ?? role);
           }
         }
         clearInterim(repName);
         clearInterim(customerName);
       } else if (r.transcript) {
-        showInterim(interimRole(overrideRef.current, lastFinalRoleRef.current, vpVerdict()), r.transcript);
+        showInterim(interimRole(overrideRef.current, lastFinalRoleRef.current, safeVerdict()), r.transcript);
       }
     },
     [emit, showInterim, clearInterim, repName, customerName, store, vpScore, vpVerdict],
