@@ -3,11 +3,10 @@
 //
 // Deepgram streaming diarization is anonymous: it tells us THAT two voices differ (a per-word integer
 // `speaker` index), never WHICH one is the advisor, gives no per-word confidence, and does not promise
-// the indices stay stable across a session. So the mapping index → role is built here from EVIDENCE:
-// per-run similarity to the rep's enrolled voiceprint (the primary signal), text cues as a fallback,
-// and an always-wins manual override. With no evidence at all it degrades to the old "rep speaks first"
-// default — but now provisionally and self-correcting, not as a hard assumption. A manual override
-// always wins, and on a single-run final it rebinds the index so a mid-session relabel is recoverable.
+// the indices stay stable across a session. Run-aligned voice evidence carries `sec`; decisive evidence
+// outranks index memory and text, and each emitted line records its `LineSource` and gap for diagnostics.
+// `engineReady` keeps rep-first confined to the no-engine degradation path, while manual overrides
+// always win and can rebind an index when Deepgram changes its assignment.
 
 export type Role = "rep" | "customer";
 

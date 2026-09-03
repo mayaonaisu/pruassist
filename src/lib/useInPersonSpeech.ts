@@ -29,11 +29,10 @@ import { pushLog, withTimeout, type VoiceLogEntry } from "./voice-log";
 // usePointers, useComprehension and the send rules all work UNCHANGED. The only in-person delta lives
 // here, in the capture layer.
 //
-// Attribution is EVIDENCE-based: each diarized run is scored against the rep's on-device voiceprint and
-// weighed with text cues, so the rep no longer has to speak first. The manual override ("who's
-// speaking") always wins, and when the voice engine is unavailable (no profile, model not loaded) it
-// degrades to text cues + the rep-first default — and, with Deepgram down entirely, to Web Speech driven
-// purely by the toggle. A firm voice rebinding relabels the recent provisional lines it corrects.
+// Finals pass through a sequential queue so every run can await its own voice score without changing
+// transcript order; failures and the 600 ms cap degrade to ring evidence instead of dropping words.
+// Each decision is also kept in a bounded in-memory log exposed by `voiceLog()` for the rep-only debug
+// table. Manual attribution still wins, and with Deepgram down the browser path remains toggle-driven.
 
 export type InPersonSpeech = LocalSpeech & {
   engine: "deepgram" | "browser"; // browser = the manual-toggle degradation path

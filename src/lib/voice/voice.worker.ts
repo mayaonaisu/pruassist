@@ -1,9 +1,9 @@
 // The speaker-verification worker: it owns the ONNX engine so onnxruntime-web's WASM never touches the
-// main thread. Two jobs:
-//  - Scoring: buffer the live PCM tap and, every HOP_SEC of new audio once WINDOW_SEC is available,
-//    embed the last WINDOW_SEC and post its cosine similarity to the rep's profile as a [t0, t1] score.
-//  - Enrolment: accumulate mic audio, then on "enroll-finish" embed every 3.0 s window (1.5 s hop),
-//    average and normalise them into one profile embedding.
+// main thread. Three jobs: fixed-window scoring for the live meter and fallback; run-aligned VAD/tile
+// scoring on `score-run`; and enrolment plus optional second-voice calibration. Confident `label`
+// messages adapt a slowly moving rep anchor and a learned customer centroid for the current epoch.
+// Live PCM stays in a 30 s worker-memory ring that is discarded continuously and never persisted;
+// enrolment persists only the rep profile and its `selfMean` / `otherMean` similarity scalars.
 //
 // Loaded with `new Worker(new URL("./voice.worker.ts", import.meta.url), { type: "module" })` — the same
 // Turbopack-validated pattern the pdf.js worker uses.
