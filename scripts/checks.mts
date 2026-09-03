@@ -49,6 +49,9 @@ const { pushSample, scoreBetween, recentVerdict } = await import("../src/lib/voi
 // Voice feature/window maths are pure and safe to import here; engine.ts (onnxruntime-web) is NOT.
 const { melSpectrogram, logMelFrame, melCentersHz, N_MELS } = await import("../src/lib/voice/features.ts");
 const { fitWindow, cosine, meanEmbedding, WINDOW_SAMPLES, RingBuffer } = await import("../src/lib/voice/window.ts");
+const { bytesToBase64, base64ToBytes } = await import("../src/lib/base64.ts");
+const { encodeProfile, decodeProfile, PROFILE_DIMS } = await import("../src/lib/voice/profile-codec.ts");
+const { saveVoiceProfile, loadVoiceProfile, deleteVoiceProfile, MAX_PROFILE_BYTES } = await import("../src/lib/voice-profile.ts");
 const { createResampler, floatTo16BitPCM } = await import("../src/lib/pcm.ts");
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
@@ -1419,6 +1422,43 @@ test("window: RingBuffer slices absolute sample ranges and zero-fills the evicte
   assert.strictEqual(rb.length, 12);
   assert.deepStrictEqual(Array.from(rb.slice(6, 12)), [7, 8, 9, 10, 11, 12]);
   assert.deepStrictEqual(Array.from(rb.slice(0, 2)), [0, 0]);
+});
+
+// ---------- voice profile: base64, codec, store ----------
+
+test("base64: round-trips arbitrary bytes", () => {
+  const bytes = new Uint8Array([0, 1, 2, 250, 255, 128, 64, 7]);
+  assert.deepStrictEqual(Array.from(base64ToBytes(bytesToBase64(bytes))), Array.from(bytes));
+});
+
+test("profile-codec: round-trips a 192-d vector within float32 precision", () => {
+  const v = new Float32Array(PROFILE_DIMS);
+  for (let i = 0; i < v.length; i++) v[i] = Math.sin(i) * 0.1;
+  const back = decodeProfile(encodeProfile(v));
+  assert.strictEqual(back.length, PROFILE_DIMS);
+  for (let i = 0; i < v.length; i++) assert.ok(Math.abs(back[i] - v[i]) < 1e-6);
+});
+
+test("profile-codec: rejects wrong dims and malformed input", () => {
+  assert.throws(() => encodeProfile(new Float32Array(100)));
+  assert.throws(() => decodeProfile("!!! not base64 !!!"));
+  assert.throws(() => decodeProfile(bytesToBase64(new Uint8Array(10)))); // valid base64, wrong length
+});
+
+test("voice-profile: save / load / delete round-trip (Map store)", async () => {
+  const b64 = encodeProfile(new Float32Array(PROFILE_DIMS).fill(0.1));
+  await saveVoiceProfile("rep-test-1", b64, "next-tdnn-c128");
+  const rec = await loadVoiceProfile("rep-test-1");
+  assert.ok(rec);
+  assert.strictEqual(rec!.profile, b64);
+  assert.strictEqual(rec!.model, "next-tdnn-c128");
+  assert.strictEqual(rec!.dims, 192);
+  await deleteVoiceProfile("rep-test-1");
+  assert.strictEqual(await loadVoiceProfile("rep-test-1"), null);
+});
+
+test("voice-profile: rejects an oversized profile", async () => {
+  await assert.rejects(() => saveVoiceProfile("rep-test-2", "x".repeat(MAX_PROFILE_BYTES + 1), "m"));
 });
 
 test("pcm: 48k->16k output length is one third and a constant signal stays constant", () => {

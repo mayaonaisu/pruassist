@@ -1,8 +1,11 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { IconArrow, IconLogout } from "../icons";
 import DocumentsInScope from "../DocumentsInScope";
+import { useVoiceProfile } from "@/lib/useVoiceProfile";
+import { VOICE_MODEL_URL } from "@/lib/voice/model-info";
 
 const NEXT = [
   { n: "01", title: "Consent & context", body: "Confirm consent, set the meeting focus, and either send the customer a private link or hand them this device to consent in person." },
@@ -12,6 +15,14 @@ const NEXT = [
 
 export default function IntroStep({ repName, onStart }: { repName: string; onStart: () => void }) {
   const name = repName && repName !== "Representative" ? repName : null;
+  const { profile } = useVoiceProfile(); // undefined while loading, null if none, else the vector
+
+  // Warm the model cache before an in-person session when a voiceprint already exists — the model is
+  // immutable-cached, so this one prefetch means the worker starts instantly at "Begin". (The ORT wasm
+  // warms on the worker's first init.)
+  useEffect(() => {
+    if (profile) fetch(VOICE_MODEL_URL, { cache: "force-cache" }).catch(() => {});
+  }, [profile]);
 
   async function logout() {
     try {
@@ -31,13 +42,29 @@ export default function IntroStep({ repName, onStart }: { repName: string; onSta
             {name ? "Ready when you are" : "Signed in"} · nothing is recorded until both parties consent
           </div>
         </div>
-        <Link href="/knowledge" className="pru-btn pru-btn-sm" style={{ marginLeft: "auto" }} title="Add your own reference material">
-          Knowledge base
-        </Link>
-        <button className="pru-btn pru-btn-sm" onClick={logout} title="Sign out of PRUAssist">
-          <IconLogout size={14} /> Log out
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+          {profile && (
+            <Link href="/rep/voice" className="pru-muted" style={{ fontSize: 12.5, textDecoration: "none" }} title="Whose voice this device recognises">
+              Voice: set up · Re-record
+            </Link>
+          )}
+          <Link href="/knowledge" className="pru-btn pru-btn-sm" title="Add your own reference material">
+            Knowledge base
+          </Link>
+          <button className="pru-btn pru-btn-sm" onClick={logout} title="Sign out of PRUAssist">
+            <IconLogout size={14} /> Log out
+          </button>
+        </div>
       </div>
+
+      {profile === null && (
+        <div className="notice" style={{ marginBottom: 18 }}>
+          Set up your voice so in-person sessions know who’s speaking (about 40 seconds).{" "}
+          <Link href="/rep/voice" style={{ color: "var(--pru)", fontWeight: 500 }}>
+            Set up now
+          </Link>
+        </div>
+      )}
 
       <DocumentsInScope title="Documents indexed for this session" />
 
