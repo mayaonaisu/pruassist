@@ -7,6 +7,7 @@ import { unlockAudio } from "@/lib/audio-context";
 import { encodeProfile } from "@/lib/voice/profile-codec";
 import { VOICE_MODEL, VOICE_MODEL_URL } from "@/lib/voice/model-info";
 import { useVoiceProfile } from "@/lib/useVoiceProfile";
+import { separationWarning, thresholdFor } from "@/lib/voice/calibration";
 
 // One-time voice enrolment for the rep, so in-person sessions know who is speaking without the rep
 // having to speak first. Everything runs on THIS device: the mic audio goes to an on-device model in a
@@ -33,22 +34,25 @@ type WorkerIn =
   | { type: "profile"; embedding: Float32Array | null }
   | { type: "pcm"; frame: Float32Array; epoch: number; tSec: number }
   | { type: "enroll-chunk"; pcm: Float32Array }
-  | { type: "enroll-finish" }
+  | { type: "enroll-finish"; mode?: "other" }
   | { type: "enroll-reset" };
 
 type WorkerOut =
   | { type: "ready" }
   | { type: "score"; epoch: number; t0: number; t1: number; score: number }
-  | { type: "embedding"; embedding: Float32Array }
+  | { type: "embedding"; embedding: Float32Array; selfMean: number }
+  | { type: "other-mean"; otherMean: number }
   | { type: "error"; message: string };
 
 export default function VoiceSetup({ username, repName }: { username: string; repName: string }) {
-  const { profile, updatedAt, reload } = useVoiceProfile();
+  const { profile, selfMean, otherMean, updatedAt, reload } = useVoiceProfile();
 
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string>("");
   const [seconds, setSeconds] = useState(0);
   const [testScore, setTestScore] = useState<number | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrationSeconds, setCalibrationSeconds] = useState(0);
 
   const workerRef = useRef<Worker | null>(null);
   const micRef = useRef<MicPcm | null>(null);
@@ -60,6 +64,8 @@ export default function VoiceSetup({ username, repName }: { username: string; re
   const embeddingRef = useRef<Float32Array | null>(null);
   const readyResolveRef = useRef<(() => void) | null>(null);
   const onEmbeddingRef = useRef<((e: Float32Array) => void) | null>(null);
+  const embeddingSelfMeanRef = useRef<number | null>(null);
+  const onOtherMeanRef = useRef<((mean: number) => void) | null>(null);
 
   const hasProfile = profile != null; // null = none, undefined = still loading
 
@@ -88,7 +94,10 @@ export default function VoiceSetup({ username, repName }: { username: string; re
       } else if (msg.type === "score") {
         setTestScore(msg.score);
       } else if (msg.type === "embedding") {
+        embeddingSelfMeanRef.current = msg.selfMean;
         onEmbeddingRef.current?.(msg.embedding);
+      } else if (msg.type === "other-mean") {
+        onOtherMeanRef.current?.(msg.otherMean);
       } else if (msg.type === "error") {
         setError(msg.message);
         setStatus("error");
@@ -137,7 +146,7 @@ export default function VoiceSetup({ username, repName }: { username: string; re
         const res = await fetch("/api/voice", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ profile: encodeProfile(embedding), model: VOICE_MODEL }),
+          body: JSON.stringify({ profile: encodeProfile(embedding), model: VOICE_MODEL, selfMean: embeddingSelfMeanRef.current }),
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
@@ -206,6 +215,81 @@ export default function VoiceSetup({ username, repName }: { username: string; re
     setStatus("saved");
   }, [stopMic]);
 
+  const stopCalibration = useCallback(() => {
+    if (!calibrating) return;
+    stopMic();
+    setCalibrating(false);
+    setStatus("computing");
+    const worker = workerRef.current;
+    if (!worker) {
+      setError("The voice engine stopped unexpectedly.");
+      setStatus("error");
+      return;
+    }
+    onOtherMeanRef.current = async (mean) => {
+      onOtherMeanRef.current = null;
+      try {
+        setStatus("saving");
+        const res = await fetch("/api/voice", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ otherMean: mean }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not save calibration.");
+        setStatus("saved");
+        reload();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not save calibration.");
+        setStatus("error");
+      }
+    };
+    worker.postMessage({ type: "enroll-finish", mode: "other" } as WorkerIn);
+  }, [calibrating, reload, stopMic]);
+
+  const startCalibration = useCallback(async () => {
+    const emb = embeddingRef.current;
+    if (!emb) return;
+    setError("");
+    unlockAudio();
+    try {
+      const worker = await ensureWorker();
+      const copy = emb.slice();
+      worker.postMessage({ type: "profile", embedding: copy } as WorkerIn, [copy.buffer]);
+      worker.postMessage({ type: "enroll-reset" } as WorkerIn);
+      setCalibrationSeconds(0);
+      setCalibrating(true);
+      setStatus("recording");
+      let elapsed = 0;
+      micRef.current = await startMicPcm16k((frame) => {
+        worker.postMessage({ type: "enroll-chunk", pcm: frame } as WorkerIn, [frame.buffer]);
+        elapsed += frame.length / 16000;
+        setCalibrationSeconds(elapsed);
+        if (elapsed >= 12) {
+          stopMic();
+          setCalibrating(false);
+          setStatus("computing");
+          onOtherMeanRef.current = async (mean) => {
+            onOtherMeanRef.current = null;
+            try {
+              const res = await fetch("/api/voice", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ otherMean: mean }) });
+              if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not save calibration.");
+              setStatus("saved");
+              reload();
+            } catch (e) {
+              setError(e instanceof Error ? e.message : "Could not save calibration.");
+              setStatus("error");
+            }
+          };
+          worker.postMessage({ type: "enroll-finish", mode: "other" } as WorkerIn);
+        }
+      });
+    } catch (e) {
+      setCalibrating(false);
+      setError(micError(e));
+      setStatus("error");
+    }
+  }, [ensureWorker, reload, stopMic]);
+
   const del = useCallback(async () => {
     stopMic();
     try {
@@ -219,7 +303,7 @@ export default function VoiceSetup({ username, repName }: { username: string; re
     reload();
   }, [stopMic, reload]);
 
-  const recording = status === "recording";
+  const recording = status === "recording" && !calibrating;
   const busy = status === "loading" || status === "computing" || status === "saving";
   const progress = Math.min(100, (seconds / TARGET_SECONDS) * 100);
 
@@ -276,7 +360,7 @@ export default function VoiceSetup({ username, repName }: { username: string; re
 
       <div className="actions-row" style={{ marginTop: 18 }}>
         {!recording ? (
-          <button className="pru-btn pru-btn-primary" onClick={startEnroll} disabled={busy || status === "testing"}>
+          <button className="pru-btn pru-btn-primary" onClick={startEnroll} disabled={busy || calibrating || status === "testing"}>
             {hasProfile ? "Re-record my voice" : "Start recording"}
           </button>
         ) : (
@@ -286,6 +370,28 @@ export default function VoiceSetup({ username, repName }: { username: string; re
         )}
         {status === "saved" && <span className="hint">Saved. You can test it below.</span>}
       </div>
+      {hasProfile && selfMean != null && <p className="pru-muted voice-self-mean">Your voice reads {selfMean.toFixed(2)} against your own voiceprint</p>}
+
+      {hasProfile && (
+        <div className="sec voice-calibration" style={{ marginTop: 26 }}>
+          <div className="sec-h">Calibrate with a second voice</div>
+          <p className="pru-muted" style={{ fontSize: 12.5, lineHeight: 1.55, marginBottom: 12 }}>
+            Have another person read these two lines into the same mic (about 10 s). Only a similarity number is saved — never their audio or voice.
+          </p>
+          <div className="voice-script">{SCRIPT.slice(0, 2).map((line, i) => <p key={i}>{line}</p>)}</div>
+          <div className="actions-row" style={{ marginTop: 12 }}>
+            {!calibrating ? <button className="pru-btn" onClick={startCalibration} disabled={busy || recording || status === "testing"}>Start</button>
+              : <button className="pru-btn" onClick={stopCalibration}>Stop</button>}
+            {calibrating && <span className="hint">Recording — {Math.floor(calibrationSeconds)} s of 12 s</span>}
+          </div>
+          {selfMean != null && otherMean != null && (
+            <div className="voice-calibration-result">
+              Your voice {selfMean.toFixed(2)} · another voice {otherMean.toFixed(2)} · gap {(selfMean - otherMean).toFixed(2)} → recommended Voice match {thresholdFor({ selfMean, otherMean }).toFixed(2)}
+            </div>
+          )}
+          {separationWarning(selfMean, otherMean) && <div className="notice bad">{separationWarning(selfMean, otherMean)}</div>}
+        </div>
+      )}
 
       {hasProfile && (
         <div className="sec" style={{ marginTop: 26 }}>

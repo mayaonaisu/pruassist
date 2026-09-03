@@ -15,11 +15,38 @@ const TTL = 60 * 60 * 24 * 3650; // ~10 years — rep data, not session state
 export const MAX_PROFILE_BYTES = 4096; // ~1 KB expected; a generous cap that still rejects abuse
 export const PROFILE_DIMS = 192;
 
-export type StoredVoiceProfile = { profile: string; dims: 192; model: string; updatedAt: number };
+export type StoredVoiceProfile = {
+  profile: string;
+  dims: 192;
+  model: string;
+  updatedAt: number;
+  // Two similarity scalars describing the rep's own profile; inside the privacy promise.
+  selfMean?: number | null;
+  otherMean?: number | null;
+};
 
-export async function saveVoiceProfile(username: string, base64: string, model: string): Promise<StoredVoiceProfile> {
+export type VoiceCalibration = { selfMean?: number | null; otherMean?: number | null };
+
+export function validateScalar(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= -1 && value <= 1 ? value : null;
+}
+
+export async function saveVoiceProfile(
+  username: string,
+  base64: string,
+  model: string,
+  extras: VoiceCalibration = {},
+): Promise<StoredVoiceProfile> {
   if (base64.length > MAX_PROFILE_BYTES) throw new Error("Voice profile is too large.");
-  const record: StoredVoiceProfile = { profile: base64, dims: PROFILE_DIMS, model, updatedAt: Date.now() };
+  const record: StoredVoiceProfile = { profile: base64, dims: PROFILE_DIMS, model, updatedAt: Date.now(), ...extras };
+  await getStore().set(key(username), record, TTL);
+  return record;
+}
+
+export async function updateVoiceCalibration(username: string, calibration: { otherMean: number }): Promise<StoredVoiceProfile> {
+  const existing = await loadVoiceProfile(username);
+  if (!existing) throw new Error("No voice profile exists.");
+  const record = { ...existing, otherMean: calibration.otherMean, updatedAt: Date.now() };
   await getStore().set(key(username), record, TTL);
   return record;
 }

@@ -16,6 +16,7 @@ import { unlockAudio } from "@/lib/useDiarizedSpeech";
 import { resolveHotkey } from "@/lib/hotkeys";
 import { transcriptText } from "@/lib/transcript";
 import { DEFAULT_ATTRIBUTE_OPTS } from "@/lib/diarize";
+import { thresholdFor } from "@/lib/voice/calibration";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
 
 const ZERO_STATS: Stats = { surfaced: 0, used: 0, flags: 0, docs: 0 };
@@ -25,6 +26,15 @@ const ZERO_STATS: Stats = { surfaced: 0, used: 0, flags: 0, docs: 0 };
 const Whiteboard = dynamic(() => import("@/components/board/Whiteboard"), { ssr: false });
 
 type Phase = "consent" | "handback" | "live";
+
+function storedVoiceThreshold(): number | null {
+  try {
+    const value = parseFloat(localStorage.getItem("pru:voiceThreshold") ?? "");
+    return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * In-person mode: one shared iPad, one microphone, no LiveKit. A three-phase machine gates the live
@@ -113,16 +123,12 @@ function InPersonConsole({
   onEnd: (transcript: string, stats: Stats, durationMin: number, comprehension: Comprehension) => void;
 }) {
   // The rep's on-device voiceprint (if enrolled) drives attribution so they needn't speak first.
-  const { profile: voiceProfile } = useVoiceProfile();
+  const { profile: voiceProfile, selfMean, otherMean } = useVoiceProfile();
   // The live "Voice match" threshold, tunable in-console and remembered per device.
-  const [voiceThreshold, setVoiceThreshold] = useState<number>(() => {
-    try {
-      const v = parseFloat(localStorage.getItem("pru:voiceThreshold") ?? "");
-      return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5;
-    } catch {
-      return 0.5;
-    }
-  });
+  const initialThreshold = storedVoiceThreshold();
+  const hasStoredThresholdRef = useRef(initialThreshold != null);
+  const appliedCalibratedDefaultRef = useRef(false);
+  const [voiceThreshold, setVoiceThreshold] = useState<number>(initialThreshold ?? 0.5);
   const changeThreshold = useCallback((v: number) => {
     setVoiceThreshold(v);
     try {
@@ -131,7 +137,22 @@ function InPersonConsole({
       /* storage unavailable — keep the in-memory value */
     }
   }, []);
-  const speech = useInPersonSpeech(repName, customerName, true, { profile: voiceProfile ?? null, voiceThreshold });
+  useEffect(() => {
+    if (voiceProfile === undefined || hasStoredThresholdRef.current || appliedCalibratedDefaultRef.current) return;
+    appliedCalibratedDefaultRef.current = true;
+    const calibrated = thresholdFor({ selfMean, otherMean });
+    queueMicrotask(() => setVoiceThreshold(calibrated));
+  }, [voiceProfile, selfMean, otherMean]);
+  const resetThreshold = useCallback(() => {
+    try {
+      localStorage.removeItem("pru:voiceThreshold");
+    } catch {
+      /* storage unavailable — the in-memory reset still applies */
+    }
+    hasStoredThresholdRef.current = false;
+    setVoiceThreshold(thresholdFor({ selfMean, otherMean }));
+  }, [selfMean, otherMean]);
+  const speech = useInPersonSpeech(repName, customerName, true, { profile: voiceProfile ?? null, selfMean, voiceThreshold });
   const { lines, interim, latest, editLine } = useTranscript(undefined, speech);
   const consent = useConsent(session.roomId);
   useWakeLock(true);
@@ -365,6 +386,7 @@ function InPersonConsole({
       {!sharing && voiceReady && (
         <div className="voice-tune" role="group" aria-label="Voice match sensitivity">
           <span className="voice-tune-label">Voice match</span>
+          <button type="button" className="voice-tune-reset" onClick={resetThreshold}>reset</button>
           <input
             type="range"
             min={0}

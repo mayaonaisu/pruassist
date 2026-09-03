@@ -20,7 +20,7 @@ type InMessage =
   | { type: "score-run"; reqId: number; epoch: number; start: number; end: number }
   | { type: "label"; reqId: number; role: "rep" | "customer"; confident: boolean }
   | { type: "enroll-chunk"; pcm: Float32Array }
-  | { type: "enroll-finish" }
+  | { type: "enroll-finish"; mode?: "other" }
   | { type: "enroll-reset" };
 
 // Window has the Window.postMessage(message, targetOrigin) signature under the dom lib; cast to the
@@ -220,7 +220,7 @@ async function scoreRun(msg: Extract<InMessage, { type: "score-run" }>): Promise
   }
 }
 
-async function finishEnroll(): Promise<void> {
+async function finishEnroll(mode?: "other"): Promise<void> {
   if (!engine) {
     ctx.postMessage({ type: "error", message: "Voice engine is not ready." });
     return;
@@ -249,7 +249,17 @@ async function finishEnroll(): Promise<void> {
     ctx.postMessage({ type: "error", message: "No usable audio was captured — try again." });
     return;
   }
-  ctx.postMessage({ type: "embedding", embedding: mean }, [mean.buffer]);
+  if (mode === "other") {
+    if (!profile) {
+      ctx.postMessage({ type: "error", message: "Load your voice profile before calibrating another voice." });
+      return;
+    }
+    const otherMean = embs.reduce((sum, emb) => sum + cosine(emb, profile!), 0) / embs.length;
+    ctx.postMessage({ type: "other-mean", otherMean });
+    return;
+  }
+  const enrolledSelfMean = embs.reduce((sum, emb) => sum + cosine(emb, mean), 0) / embs.length;
+  ctx.postMessage({ type: "embedding", embedding: mean, selfMean: enrolledSelfMean }, [mean.buffer]);
 }
 
 ctx.onmessage = (ev: MessageEvent) => {
@@ -282,7 +292,7 @@ ctx.onmessage = (ev: MessageEvent) => {
           enrollFrames.push(new Float32Array(msg.pcm));
           break;
         case "enroll-finish":
-          await finishEnroll();
+          await finishEnroll(msg.mode);
           break;
         case "enroll-reset":
           enrollFrames = [];

@@ -53,7 +53,8 @@ const { anchorOf, seedLo, fitWindow, tileWindow, cosine, meanEmbedding, WINDOW_S
 const { voicedFrames, voicedSeconds } = await import("../src/lib/voice/vad.ts");
 const { bytesToBase64, base64ToBytes } = await import("../src/lib/base64.ts");
 const { encodeProfile, decodeProfile, PROFILE_DIMS } = await import("../src/lib/voice/profile-codec.ts");
-const { saveVoiceProfile, loadVoiceProfile, deleteVoiceProfile, MAX_PROFILE_BYTES } = await import("../src/lib/voice-profile.ts");
+const { saveVoiceProfile, loadVoiceProfile, deleteVoiceProfile, updateVoiceCalibration, validateScalar, MAX_PROFILE_BYTES } = await import("../src/lib/voice-profile.ts");
+const { thresholdFor, separationWarning, MIN_SEPARATION } = await import("../src/lib/voice/calibration.ts");
 const { createResampler, floatTo16BitPCM } = await import("../src/lib/pcm.ts");
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
@@ -1616,6 +1617,40 @@ test("voice-profile: save / load / delete round-trip (Map store)", async () => {
   assert.strictEqual(rec!.dims, 192);
   await deleteVoiceProfile("rep-test-1");
   assert.strictEqual(await loadVoiceProfile("rep-test-1"), null);
+});
+
+test("voice-profile: calibration extras round-trip and patch without replacing the profile", async () => {
+  const b64 = encodeProfile(new Float32Array(PROFILE_DIMS).fill(0.15));
+  await saveVoiceProfile("rep-calibration", b64, "next-tdnn-c128", { selfMean: 0.82, otherMean: -0.1 });
+  assert.deepStrictEqual(await loadVoiceProfile("rep-calibration"), {
+    profile: b64, dims: 192, model: "next-tdnn-c128", updatedAt: (await loadVoiceProfile("rep-calibration"))!.updatedAt,
+    selfMean: 0.82, otherMean: -0.1,
+  });
+  const patched = await updateVoiceCalibration("rep-calibration", { otherMean: 0.31 });
+  assert.strictEqual(patched.profile, b64);
+  assert.strictEqual((await loadVoiceProfile("rep-calibration"))!.otherMean, 0.31);
+  await deleteVoiceProfile("rep-calibration");
+  await assert.rejects(() => updateVoiceCalibration("rep-calibration", { otherMean: 0.2 }), /No voice profile/);
+});
+
+test("voice scalar validation accepts only finite cosine-range numbers", () => {
+  assert.strictEqual(validateScalar(-1), -1);
+  assert.strictEqual(validateScalar(1), 1);
+  for (const value of [-1.01, 1.01, Infinity, NaN, "0.5", null]) assert.strictEqual(validateScalar(value), null);
+});
+
+test("voice calibration: threshold uses both baselines, self-only, fallback, rounding and clamps", () => {
+  assert.strictEqual(thresholdFor({ selfMean: 0.8, otherMean: 0.2 }), 0.5);
+  assert.strictEqual(thresholdFor({ selfMean: 0.83, otherMean: null }), 0.68);
+  assert.strictEqual(thresholdFor({ selfMean: null, otherMean: null }), 0.5);
+  assert.strictEqual(thresholdFor({ selfMean: 1, otherMean: 1 }), 0.95);
+  assert.strictEqual(thresholdFor({ selfMean: -1, otherMean: -1 }), 0.05);
+});
+
+test("voice calibration: warns below, but not at, the minimum separation", () => {
+  assert.strictEqual(MIN_SEPARATION, 0.2);
+  assert.strictEqual(separationWarning(0.7, 0.5), null);
+  assert.match(separationWarning(0.7, 0.51) ?? "", /only 0\.19 apart/);
 });
 
 test("voice-profile: rejects an oversized profile", async () => {

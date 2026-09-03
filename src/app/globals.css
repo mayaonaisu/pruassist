@@ -2420,6 +2420,27 @@ button {
   color: var(--ink);
   white-space: nowrap;
 }
+
+.voice-tune-reset {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.voice-self-mean,
+.voice-calibration-result {
+  font-size: 12.5px;
+  margin-top: 10px;
+}
+
+.voice-calibration .notice {
+  margin-top: 12px;
+}
 .voice-slider {
   flex: 1;
   min-width: 120px;

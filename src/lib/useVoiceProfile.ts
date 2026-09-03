@@ -10,6 +10,8 @@ import { VOICE_MODEL } from "./voice/model-info";
 
 export type LoadedVoiceProfile = {
   profile: Float32Array | null | undefined;
+  selfMean: number | null;
+  otherMean: number | null;
   updatedAt: number | null;
   reload: () => void;
 };
@@ -17,6 +19,8 @@ export type LoadedVoiceProfile = {
 export function useVoiceProfile(): LoadedVoiceProfile {
   const [profile, setProfile] = useState<Float32Array | null | undefined>(undefined);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [selfMean, setSelfMean] = useState<number | null>(null);
+  const [otherMean, setOtherMean] = useState<number | null>(null);
   const [nonce, setNonce] = useState(0);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
@@ -35,6 +39,8 @@ export function useVoiceProfile(): LoadedVoiceProfile {
               const v = decodeProfile(data.profile);
               setProfile(v);
               setUpdatedAt(typeof data.updatedAt === "number" ? data.updatedAt : null);
+              setSelfMean(typeof data.selfMean === "number" ? data.selfMean : null);
+              setOtherMean(typeof data.otherMean === "number" ? data.otherMean : null);
               return;
             } catch {
               /* corrupt profile → treat as missing */
@@ -43,10 +49,14 @@ export function useVoiceProfile(): LoadedVoiceProfile {
         }
         setProfile(null);
         setUpdatedAt(null);
+        setSelfMean(null);
+        setOtherMean(null);
       } catch {
         if (active) {
           setProfile(null);
           setUpdatedAt(null);
+          setSelfMean(null);
+          setOtherMean(null);
         }
       }
     })();
@@ -55,5 +65,5 @@ export function useVoiceProfile(): LoadedVoiceProfile {
     };
   }, [nonce]);
 
-  return { profile, updatedAt, reload };
+  return { profile, selfMean, otherMean, updatedAt, reload };
 }
