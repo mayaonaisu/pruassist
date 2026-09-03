@@ -10,6 +10,7 @@ import { useConsent } from "@/lib/useConsent";
 import { usePointers } from "@/lib/usePointers";
 import { useTranscript } from "@/lib/useTranscript";
 import { useInPersonSpeech } from "@/lib/useInPersonSpeech";
+import { useVoiceProfile } from "@/lib/useVoiceProfile";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { unlockAudio } from "@/lib/useDiarizedSpeech";
 import { resolveHotkey } from "@/lib/hotkeys";
@@ -110,7 +111,9 @@ function InPersonConsole({
   customerName: string;
   onEnd: (transcript: string, stats: Stats, durationMin: number, comprehension: Comprehension) => void;
 }) {
-  const speech = useInPersonSpeech(repName, customerName, true);
+  // The rep's on-device voiceprint (if enrolled) drives attribution so they needn't speak first.
+  const { profile: voiceProfile } = useVoiceProfile();
+  const speech = useInPersonSpeech(repName, customerName, true, { profile: voiceProfile ?? null });
   const { lines, interim, latest, editLine } = useTranscript(undefined, speech);
   const consent = useConsent(session.roomId);
   useWakeLock(true);
@@ -228,8 +231,13 @@ function InPersonConsole({
                 className={`turn-opt ${speech.override === null ? "on" : ""}`}
                 aria-pressed={speech.override === null}
                 onClick={() => speech.setOverride(null)}
+                title={
+                  speech.voiceStatus === "ready"
+                    ? `Using ${repName}'s voiceprint to tell you and ${displayName} apart`
+                    : "Attribution decides who's speaking automatically"
+                }
               >
-                Auto
+                {speech.voiceStatus === "ready" ? "Auto · voice" : "Auto"}
               </button>
             )}
             <button

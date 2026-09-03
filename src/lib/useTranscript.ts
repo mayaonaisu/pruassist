@@ -49,12 +49,17 @@ export function useLineStore() {
   const [interim, setInterim] = useState<Record<string, string>>({});
   const idRef = useRef(0);
 
-  const addFinal = useCallback((speaker: string, text: string, flag = false) => {
+  // Returns the new line's id (or undefined if the text was empty after normalisation), so the
+  // in-person attribution layer can later relabel a provisional line by id. The id is computed before
+  // setLines so it can be returned synchronously; callers that ignore it are unaffected.
+  const addFinal = useCallback((speaker: string, text: string, flag = false): string | undefined => {
     const fixed = fixTerms(text.trim());
-    if (!fixed) return;
+    if (!fixed) return undefined;
     const at = Date.now();
-    setLines((prev) => [...prev.slice(-MAX_LINES), { id: `${at}-${idRef.current++}`, at, speaker, text: fixed, flag }]);
+    const id = `${at}-${idRef.current++}`;
+    setLines((prev) => [...prev.slice(-MAX_LINES), { id, at, speaker, text: fixed, flag }]);
     setInterim((prev) => ({ ...prev, [speaker]: "" }));
+    return id;
   }, []);
 
   const setSpeakerInterim = useCallback((speaker: string, text: string) => {
