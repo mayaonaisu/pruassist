@@ -46,6 +46,9 @@ const { lastFromCustomer, newestAt, toTurns, windowToSend, applyLineEdit, applyS
 const { splitRuns, emptySpeakerMap, attributeFinal, interimRole, noteProvisional, relabelPlan } = await import("../src/lib/diarize.ts");
 const { textCue } = await import("../src/lib/speaker-cues.ts");
 const { pushSample, scoreBetween, recentVerdict } = await import("../src/lib/voice-ring.ts");
+// Voice feature/window maths are pure and safe to import here; engine.ts (onnxruntime-web) is NOT.
+const { melSpectrogram, logMelFrame, melCentersHz, N_MELS } = await import("../src/lib/voice/features.ts");
+const { fitWindow, cosine, meanEmbedding, WINDOW_SAMPLES, RingBuffer } = await import("../src/lib/voice/window.ts");
 const { createResampler, floatTo16BitPCM } = await import("../src/lib/pcm.ts");
 const { DECISIONS, decisionById, decisionsForArea, looksComparative } = await import("../src/lib/decisions.ts");
 const { activeDecision, readinessFor } = await import("../src/lib/agent/readiness.ts");
@@ -1363,6 +1366,59 @@ test("provisional book: entries older than the window are pruned", () => {
   assert.deepStrictEqual(book[0].map((e) => e.id), ["new"]); // "old" pruned on the second note
   const plan = relabelPlan(book, [], 200000); // no rebinds; the stale "new" is pruned too
   assert.ok(!(0 in plan.book));
+});
+
+// ---------- voice features / window (the vendored mel pipeline, pure parts) ----------
+
+test("features: a 3 s window yields exactly 300 frames and an 80×frames matrix", () => {
+  const { data, frames } = melSpectrogram(new Float32Array(WINDOW_SAMPLES));
+  assert.strictEqual(frames, 300); // (48240 - 400) / 160 + 1
+  assert.strictEqual(data.length, N_MELS * 300);
+});
+
+test("features: a pure 1 kHz tone puts its energy in the mel bin centred near 1 kHz", () => {
+  const frame = new Float32Array(400);
+  for (let i = 0; i < frame.length; i++) frame[i] = Math.sin((2 * Math.PI * 1000 * i) / 16000);
+  const mel = logMelFrame(frame); // pre-mean, so the tone's peak survives
+  let arg = 0;
+  for (let m = 1; m < mel.length; m++) if (mel[m] > mel[arg]) arg = m;
+  const centers = melCentersHz();
+  assert.ok(Math.abs(centers[arg] - 1000) < 200, `argmax bin centre ${centers[arg]} Hz`);
+});
+
+test("window: fitWindow pads short and truncates long to exactly WINDOW_SAMPLES", () => {
+  assert.strictEqual(fitWindow(new Float32Array(100)).length, WINDOW_SAMPLES);
+  assert.strictEqual(fitWindow(new Float32Array(WINDOW_SAMPLES + 500)).length, WINDOW_SAMPLES);
+  const padded = fitWindow(Float32Array.of(1, 2, 3));
+  assert.strictEqual(padded[0], 1);
+  assert.strictEqual(padded[3], 0); // tail zero-padded
+});
+
+test("window: cosine is 1 / 0 / -1 for identical, orthogonal, opposite; 0 for a zero vector", () => {
+  const a = Float32Array.of(1, 0);
+  assert.ok(Math.abs(cosine(a, a) - 1) < 1e-9);
+  assert.ok(Math.abs(cosine(a, Float32Array.of(0, 1))) < 1e-9);
+  assert.ok(Math.abs(cosine(a, Float32Array.of(-1, 0)) + 1) < 1e-9);
+  assert.strictEqual(cosine(a, Float32Array.of(0, 0)), 0);
+});
+
+test("window: meanEmbedding averages then L2-normalises", () => {
+  const m = meanEmbedding([Float32Array.of(3, 0), Float32Array.of(0, 4)]);
+  let norm = 0;
+  for (const v of m) norm += v * v;
+  assert.ok(Math.abs(Math.sqrt(norm) - 1) < 1e-6); // Float32 precision
+  assert.ok(Math.abs(m[0] - 0.6) < 1e-6 && Math.abs(m[1] - 0.8) < 1e-6);
+  assert.strictEqual(meanEmbedding([]).length, 0);
+});
+
+test("window: RingBuffer slices absolute sample ranges and zero-fills the evicted", () => {
+  const rb = new RingBuffer(10);
+  rb.append(Float32Array.of(1, 2, 3, 4, 5, 6));
+  assert.deepStrictEqual(Array.from(rb.slice(2, 5)), [3, 4, 5]);
+  rb.append(Float32Array.of(7, 8, 9, 10, 11, 12)); // capacity 10 → oldest retained is abs 2
+  assert.strictEqual(rb.length, 12);
+  assert.deepStrictEqual(Array.from(rb.slice(6, 12)), [7, 8, 9, 10, 11, 12]);
+  assert.deepStrictEqual(Array.from(rb.slice(0, 2)), [0, 0]);
 });
 
 test("pcm: 48k->16k output length is one third and a constant signal stays constant", () => {

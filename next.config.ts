@@ -10,6 +10,17 @@ const nextConfig: NextConfig = {
         source: "/docs/:file*.pdf",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },
+      {
+        // The on-device speaker-verification model (~8 MB) and onnxruntime-web's WASM runtime
+        // (~10 MB). Both are versioned by filename and never mutated in place, so cache them
+        // immutably — the iPad fetches each once, not per session.
+        source: "/models/:file*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+      {
+        source: "/ort/:file*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
     ];
   },
 };

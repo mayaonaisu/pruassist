@@ -12,6 +12,9 @@ node_modules/
 out/
 build/
 *.tsbuildinfo
+# onnxruntime-web's WASM runtime, copied from node_modules by scripts/copy-ort-wasm.mjs on postinstall.
+# Regenerated, so never committed. (The NeXt-TDNN model under public/models/*.onnx IS committed.)
+public/ort/
 
 # === Not part of the app: input PDFs, private recordings, local binaries, generated docs ===
 *.pdf

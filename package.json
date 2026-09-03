@@ -12,9 +12,11 @@
     "check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs --test scripts/checks.mts",
     "stt:check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/stt-check.mts",
     "diarize:check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/diarize-check.mts",
+    "voice:check": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/voice-check.mts",
     "ingest:web": "node ./node_modules/tsx/dist/cli.mjs scripts/ingest-web.mts",
     "e2e": "node --env-file-if-exists=.env.local scripts/e2e.mjs",
-    "drive": "node --env-file-if-exists=.env.local scripts/drive.mjs"
+    "drive": "node --env-file-if-exists=.env.local scripts/drive.mjs",
+    "postinstall": "node scripts/copy-ort-wasm.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",
@@ -27,6 +29,7 @@
     "livekit-client": "^2.20.0",
     "livekit-server-sdk": "^2.15.5",
     "next": "16.2.9",
+    "onnxruntime-web": "1.29.0",
     "pdfjs-dist": "^6.3.289",
     "react": "19.2.4",
     "react-dom": "19.2.4"
