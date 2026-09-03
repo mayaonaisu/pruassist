@@ -7,7 +7,10 @@ import { getStore } from "./store";
 // stored with it so a future model swap can invalidate stale profiles (a new model embeds into a
 // different space). Same Store seam as everything else (Redis, or the in-process Map).
 
-const key = (username: string) => `rep:voice:${username}`;
+// Canonical key: login is case-insensitive (see api/login) but the JWT subject keeps the typed case, so
+// the same rep typing "Bryan" vs "bryan" must not split into two profiles. Normalise here so the
+// voiceprint is one per account regardless of case/whitespace — this is what makes it cross-device.
+const key = (username: string) => `rep:voice:${username.trim().toLowerCase()}`;
 const TTL = 60 * 60 * 24 * 3650; // ~10 years — rep data, not session state
 export const MAX_PROFILE_BYTES = 4096; // ~1 KB expected; a generous cap that still rejects abuse
 export const PROFILE_DIMS = 192;

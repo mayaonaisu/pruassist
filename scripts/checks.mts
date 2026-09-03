@@ -1497,6 +1497,17 @@ test("voice-profile: rejects an oversized profile", async () => {
   await assert.rejects(() => saveVoiceProfile("rep-test-2", "x".repeat(MAX_PROFILE_BYTES + 1), "m"));
 });
 
+test("voice-profile: the key is case- and whitespace-insensitive (one profile per account)", async () => {
+  const b64 = encodeProfile(new Float32Array(PROFILE_DIMS).fill(0.2));
+  await saveVoiceProfile("Bryan", b64, "next-tdnn-c128"); // saved as the typed case
+  const lower = await loadVoiceProfile("bryan");
+  assert.ok(lower, "a profile saved as 'Bryan' must load as 'bryan'");
+  assert.strictEqual(lower!.profile, b64);
+  assert.ok(await loadVoiceProfile("  BRYAN "), "trims and case-folds");
+  await deleteVoiceProfile("bRyAn"); // delete normalises too
+  assert.strictEqual(await loadVoiceProfile("Bryan"), null);
+});
+
 test("pcm: 48k->16k output length is one third and a constant signal stays constant", () => {
   const rs = createResampler(48000, 16000);
   const out = rs.push(new Float32Array(48000).fill(0.5));
