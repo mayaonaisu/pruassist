@@ -1,7 +1,8 @@
 import { Type } from "@google/genai";
 import { citationsFor, conceptsForArea, type Concept } from "../concepts";
 import { clauseById, type Clause } from "../knowledge";
-import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "./gemini";
+import { callWithRetry, JSON_BUDGET, MAX_TOOL_STEPS, MODEL, thinking } from "./gemini";
+import { openaiEnabled, openaiGatherClauses, openaiJson } from "./openai";
 import { haveKey } from "../genai";
 import { clauseBlock, HOUSE_RULES, POINTER_FIELDS, POSTURE } from "./prompts";
 import { activeDecision } from "./readiness";
@@ -86,27 +87,28 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
   // Already prepared for this concept and nothing has changed — do not spend the calls again.
   if (state.lookahead?.conceptId === target.id && state.lookahead.rev === state.rev) return state.lookahead;
 
-  // Phase 1: tools on, free-form. The model decides what to look up.
-  //
-  // Bounded to 2 steps at low thinking. On Vercel the deep pass runs inside `after()` under a 60s
-  // function limit, and the full 3-step MEDIUM-thinking loop routinely blew past it and was killed —
-  // so the prepared answer never landed. Two steps (read the ledger, search once) is what this gather
-  // actually needs, and the retrieval fallback below guarantees a grounded answer even if the leaner
-  // loop searches less, so the latency cut costs reliability nothing.
-  const gathered = await runToolLoop(
+  // Phase 1: tools on, free-form. The model decides what to look up. OpenAI when configured (off
+  // Gemini's free tier), else the Gemini tool loop.
+  const gatherInstruction =
     `${POSTURE} You are preparing, in the background, for the question this customer is most likely ` +
-      `to ask next. ${HOUSE_RULES} Read the ledger to see what they have agreed to without ` +
-      `demonstrating and what they got wrong. You MUST call search_policy at least once — never ` +
-      `write the brief without searching first — for the clauses that would answer their next ` +
-      `question. When you have what you need, write a short evidence brief: the single question you ` +
-      `expect, and the clause facts that answer it. Do not write the reply itself.`,
+    `to ask next. ${HOUSE_RULES} Read the ledger to see what they have agreed to without ` +
+    `demonstrating and what they got wrong. You MUST call search_policy at least once — never ` +
+    `write the brief without searching first — for the clauses that would answer their next ` +
+    `question. When you have what you need, write a short evidence brief: the single question you ` +
+    `expect, and the clause facts that answer it. Do not write the reply itself.`;
+  const gatherTask =
     `The representative is discussing ${state.productArea}. The concept most at risk right now is ` +
-      `"${target.label}". Recent conversation:\n${recent || "(nothing yet)"}\n\n` +
-      `Work out the one question this customer is most likely to ask next about it, and gather the ` +
-      `clauses that answer it.`,
-    { state, productArea: state.productArea },
-    { maxSteps: 2, think: "off" },
-  );
+    `"${target.label}". Recent conversation:\n${recent || "(nothing yet)"}\n\n` +
+    `Work out the one question this customer is most likely to ask next about it, and gather the ` +
+    `clauses that answer it.`;
+  const ctx = { state, productArea: state.productArea };
+  let gathered: { text: string; run: { cited: Hit[]; steps: number; transcript: string[] } } | null;
+  if (openaiEnabled()) {
+    const g = await openaiGatherClauses(gatherInstruction, gatherTask, ctx, MAX_TOOL_STEPS);
+    gathered = { text: g.text, run: { cited: g.cited, steps: g.transcript.length, transcript: g.transcript } };
+  } else {
+    gathered = await runToolLoop(gatherInstruction, gatherTask, ctx);
+  }
   if (!gathered) return null;
 
   // The tool loop occasionally returns without calling search_policy, gathering no clauses. Rather
@@ -124,32 +126,39 @@ export async function prepareLookahead(state: AgentState, recent: string): Promi
   // output cannot be combined with tools, and on the 2.5 series it also fails when contents merely
   // contains function-call history — so nothing from phase 1 is carried over except its prose.
   let pointers: Pointers & { question: string };
-  const res = await callWithRetry("lookahead", (ai) =>
-    ai.models.generateContent({
-      model: MODEL,
-      contents:
-        `POLICY CLAUSES:\n${clauseBlock(clauses)}\n\n` +
-        `EVIDENCE BRIEF:\n${gathered.text || "(none — work from the clauses)"}\n\n` +
-        `RECENT CONVERSATION:\n${recent || "(nothing yet)"}`,
-      config: {
-        systemInstruction:
-          `You are PRUAssist, a PRIVATE co-pilot for a Prudential financial representative. ${POSTURE} ` +
-          `${HOUSE_RULES} Write the pointers the representative will need when the expected question ` +
-          `arrives. "question" is that expected question in the customer's own likely words. ` +
-          `Respond ONLY with JSON of this shape, plus "question":\n${POINTER_FIELDS}`,
-        responseMimeType: "application/json",
-        responseSchema: SCHEMA,
-        // Formatting only — phase 1 already did the reasoning.
-        thinkingConfig: thinking("off"),
-        temperature: 0.3,
-        maxOutputTokens: JSON_BUDGET * 2,
-      },
-    }),
-  );
-  if (!res) return null;
+  const synthSystem =
+    `You are PRUAssist, a PRIVATE co-pilot for a Prudential financial representative. ${POSTURE} ` +
+    `${HOUSE_RULES} Write the pointers the representative will need when the expected question ` +
+    `arrives. "question" is that expected question in the customer's own likely words. ` +
+    `Respond ONLY with JSON of this shape, plus "question":\n${POINTER_FIELDS}`;
+  const synthUser =
+    `POLICY CLAUSES:\n${clauseBlock(clauses)}\n\n` +
+    `EVIDENCE BRIEF:\n${gathered.text || "(none — work from the clauses)"}\n\n` +
+    `RECENT CONVERSATION:\n${recent || "(nothing yet)"}`;
+  // OpenAI when configured, Gemini as the fallback — same JSON shape (formatting only; phase 1 did
+  // the reasoning).
+  let raw: string | null = openaiEnabled() ? await openaiJson(synthSystem, synthUser, JSON_BUDGET * 2) : null;
+  if (raw === null) {
+    const res = await callWithRetry("lookahead", (ai) =>
+      ai.models.generateContent({
+        model: MODEL,
+        contents: synthUser,
+        config: {
+          systemInstruction: synthSystem,
+          responseMimeType: "application/json",
+          responseSchema: SCHEMA,
+          thinkingConfig: thinking("off"),
+          temperature: 0.3,
+          maxOutputTokens: JSON_BUDGET * 2,
+        },
+      }),
+    );
+    raw = res?.text ?? null;
+  }
+  if (raw === null) return null;
 
   try {
-    const p = JSON.parse((res.text ?? "{}").trim()) as Record<string, unknown>;
+    const p = JSON.parse((raw ?? "{}").trim()) as Record<string, unknown>;
     const str = (v: unknown) => (typeof v === "string" ? v : "");
     pointers = {
       question: str(p.question),

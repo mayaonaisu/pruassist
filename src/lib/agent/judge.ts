@@ -1,6 +1,7 @@
 import { Type } from "@google/genai";
 import { clausesFor, conceptById, type Concept } from "../concepts";
 import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "./gemini";
+import { openaiEnabled, openaiJson } from "./openai";
 import { haveKey } from "../genai";
 import { clauseBlock, HOUSE_RULES } from "./prompts";
 import { normaliseQuote } from "./utterance";
@@ -36,46 +37,52 @@ export async function gradeExplainBack(concept: Concept, answer: string): Promis
   if (!haveKey() || answer.trim().split(/\s+/).length < 3) return null;
 
   const clauses = clausesFor(concept);
-  const res = await callWithRetry("judge", (ai) =>
-    ai.models.generateContent({
-      model: MODEL,
-      contents:
-        `POLICY CLAUSES:\n${clauseBlock(clauses)}\n\n` +
-        `WHAT THE POLICY ACTUALLY SAYS, IN PLAIN LANGUAGE:\n${concept.canonical}\n\n` +
-        `KNOWN MISCONCEPTIONS:\n${concept.misconceptions.map((m) => `- ${m}`).join("\n")}\n\n` +
-        `THE REPRESENTATIVE ASKED:\n${concept.teachBack}\n\n` +
-        `THE CUSTOMER ANSWERED:\n${answer}`,
-      config: {
-        systemInstruction:
-          "Grade the customer's answer against what the policy says. " +
-          HOUSE_RULES +
-          " Grade ONE idea: the one in WHAT THE POLICY ACTUALLY SAYS. Never mark an answer down " +
-          "for leaving out something true but belonging to a different part of the policy — the " +
-          "representative asked about one thing, and an alert about a second thing would read as " +
-          "the customer having failed when they did not. " +
-          "`correct` means they captured the substance, even loosely and without the jargon. " +
-          "`partial` means part of it is right and a material part is either missing or stated " +
-          "wrongly. `wrong` is for an answer with none of the idea left standing: the substance " +
-          "itself is contradicted, not one part of it hanging off a half the customer did get. " +
-          "An answer that lands half the idea and has the other half backwards is `partial`, " +
-          "never `wrong` — the half they landed is real, and grading the whole answer wrong " +
-          "sends the representative back to explain it from the start when one thing needs " +
-          "correcting. Be generous about wording and strict about substance: a customer " +
-          "explaining it in their own words is the point. " +
-          "`missing` names the specific part they did not get, addressed to the representative in " +
-          "one short sentence, and is empty when the verdict is correct. `got` names what they did " +
-          "get, in one short clause.",
-        responseMimeType: "application/json",
-        responseSchema: SCHEMA,
-        thinkingConfig: thinking("off"),
-        temperature: 0,
-        maxOutputTokens: JSON_BUDGET,
-      },
-    }),
-  );
-  if (!res) return null;
+  const user =
+    `POLICY CLAUSES:\n${clauseBlock(clauses)}\n\n` +
+    `WHAT THE POLICY ACTUALLY SAYS, IN PLAIN LANGUAGE:\n${concept.canonical}\n\n` +
+    `KNOWN MISCONCEPTIONS:\n${concept.misconceptions.map((m) => `- ${m}`).join("\n")}\n\n` +
+    `THE REPRESENTATIVE ASKED:\n${concept.teachBack}\n\n` +
+    `THE CUSTOMER ANSWERED:\n${answer}`;
+  const system =
+    "Grade the customer's answer against what the policy says. " +
+    HOUSE_RULES +
+    " Grade ONE idea: the one in WHAT THE POLICY ACTUALLY SAYS. Never mark an answer down " +
+    "for leaving out something true but belonging to a different part of the policy — the " +
+    "representative asked about one thing, and an alert about a second thing would read as " +
+    "the customer having failed when they did not. " +
+    "`correct` means they captured the substance, even loosely and without the jargon. " +
+    "`partial` means part of it is right and a material part is either missing or stated " +
+    "wrongly. `wrong` is for an answer with none of the idea left standing: the substance " +
+    "itself is contradicted, not one part of it hanging off a half the customer did get. " +
+    "An answer that lands half the idea and has the other half backwards is `partial`, " +
+    "never `wrong` — the half they landed is real, and grading the whole answer wrong " +
+    "sends the representative back to explain it from the start when one thing needs " +
+    "correcting. Be generous about wording and strict about substance: a customer " +
+    "explaining it in their own words is the point. " +
+    "`missing` names the specific part they did not get, addressed to the representative in " +
+    "one short sentence, and is empty when the verdict is correct. `got` names what they did " +
+    'get, in one short clause. Respond only with JSON: {"verdict","missing","got"}.';
 
-  const text = (res.text ?? "").trim();
+  // OpenAI when configured (off Gemini's free-tier cap), Gemini as the fallback — same JSON shape.
+  let text: string | null = openaiEnabled() ? await openaiJson(system, user, JSON_BUDGET) : null;
+  if (text === null) {
+    const res = await callWithRetry("judge", (ai) =>
+      ai.models.generateContent({
+        model: MODEL,
+        contents: user,
+        config: {
+          systemInstruction: system,
+          responseMimeType: "application/json",
+          responseSchema: SCHEMA,
+          thinkingConfig: thinking("off"),
+          temperature: 0,
+          maxOutputTokens: JSON_BUDGET,
+        },
+      }),
+    );
+    text = res?.text ?? null;
+  }
+  text = text?.trim() ?? "";
   if (!text) {
     // Almost always the token cap: thinking counts against it, so a tight budget returns nothing.
     console.error("[judge] empty response — raise JSON_BUDGET if this recurs");

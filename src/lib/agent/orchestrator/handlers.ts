@@ -3,6 +3,7 @@ import { retrieve, type Hit } from "../../retrieval";
 import { callWithRetry, JSON_BUDGET, MODEL, thinking } from "../gemini";
 import { clauseBlock, comparisonSystemInstruction, guidanceSystemInstruction, HOUSE_RULES, pointerSystemInstruction, POSTURE } from "../prompts";
 import { groqEnabled, groqGatherClauses, groqGenerateRaw } from "../groq";
+import { openaiEnabled, openaiGatherClauses, openaiJson } from "../openai";
 import { activeDecision, readinessFor } from "../readiness";
 import { runToolLoop } from "../tools";
 import { conceptsMentioned } from "../utterance";
@@ -42,10 +43,14 @@ export async function gatherClauses(input: OrchestratorInput, hint?: string): Pr
     `The representative is discussing ${input.scope}.${hint ? ` ${hint}` : ""} Recent conversation:\n` +
     `${input.transcript}\n\nGather the clauses that answer the customer's latest turn, then stop.`;
   const ctx = { state: input.state, productArea: input.scope };
-  // Groq (fast) when enabled; otherwise the Gemini tool loop. Both fall back to a plain retrieve so
-  // an empty or failed gather never leaves the rep with nothing.
+  // Provider precedence: Groq (fast LPU) → OpenAI → Gemini. All fall back to a plain retrieve so an
+  // empty or failed gather never leaves the rep with nothing.
   if (groqEnabled()) {
     const cited = await groqGatherClauses(GATHER_INSTRUCTION, task, ctx, 2);
+    return cited.length ? cited : retrieve(input.transcript, 3, input.scope);
+  }
+  if (openaiEnabled()) {
+    const { cited } = await openaiGatherClauses(GATHER_INSTRUCTION, task, ctx, 2);
     return cited.length ? cited : retrieve(input.transcript, 3, input.scope);
   }
   // Live path: rotate keys under a rate limit, never sleep — the rep is waiting inside maxDuration.
@@ -63,7 +68,11 @@ async function generateRaw(instruction: string, hits: Hit[], transcript: string)
   if (groqEnabled()) {
     const groq = await groqGenerateRaw(instruction, clauseBlock(hits), transcript);
     if (groq !== null) return groq;
-    // Groq unavailable — fall through to Gemini rather than drop to a rate-limit note.
+    // Groq unavailable — fall through to OpenAI, then Gemini, rather than drop to a rate-limit note.
+  }
+  if (openaiEnabled()) {
+    const oa = await openaiJson(instruction, `POLICY CLAUSES:\n${clauseBlock(hits)}\n\nRECENT TRANSCRIPT:\n${transcript}`, JSON_BUDGET);
+    if (oa !== null) return oa;
   }
   const response = await callWithRetry(
     "orchestrator",
