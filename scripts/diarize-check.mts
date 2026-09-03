@@ -48,7 +48,10 @@ const WS_URL =
   "&encoding=linear16&sample_rate=16000&channels=1&" + DIARIZE_PARAMS;
 
 // Two distinct built-in voices so the diarizer has two timbres to separate. Apostrophe-free so each
-// line survives the PowerShell single-quoted string. The rep speaks first (calibration anchor).
+// line survives the PowerShell single-quoted string. The rep speaks first here only as fixture order:
+// attribution is now evidence-based (voiceprint + text cues), and with no evidence supplied
+// attributeFinal still defaults rep-first, so this contract check is unchanged. Voiceprint end-to-end
+// is covered separately by `npm run voice:check`.
 const DIALOGUE: { voice: string; who: string; text: string }[] = [
   { voice: "Microsoft David Desktop", who: "rep", text: "Thanks for coming in today. I want to walk you through how the PRUShield deductible works before we compare plans." },
   { voice: "Microsoft Zira Desktop", who: "customer", text: "Okay, so does that mean I pay the first part of every hospital bill myself?" },
