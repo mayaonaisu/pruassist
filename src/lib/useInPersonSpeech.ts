@@ -18,9 +18,11 @@ import {
   type Role,
   type SpeakerMap,
   type ProvisionalBook,
+  type VoiceEvidence,
 } from "./diarize";
 import { textCue } from "./speaker-cues";
 import { useVoiceprint, type VoiceprintStatus } from "./useVoiceprint";
+import { pushLog, withTimeout, type VoiceLogEntry } from "./voice-log";
 
 // In-person mode's speech source: one shared iPad mic, diarized by Deepgram, attributed to the rep or
 // the customer and emitted as a LocalSpeech-compatible surface — so useTranscript(undefined, this),
@@ -44,6 +46,7 @@ export type InPersonSpeech = LocalSpeech & {
   liveScore: () => number | null; // newest rep similarity, for the tuning meter
   liveCustScore: () => number | null; // newest customer-centroid similarity (null until seeded)
   swapSpeaker: (id: string) => void; // per-line correction
+  voiceLog: () => readonly VoiceLogEntry[];
 };
 
 export function useInPersonSpeech(
@@ -60,13 +63,20 @@ export function useInPersonSpeech(
   const overrideRef = useRef<Role | null>(null);
   const bookRef = useRef<ProvisionalBook>({});
   const epochRef = useRef(0);
+  const queueRef = useRef(Promise.resolve());
+  // In memory only: contains transcript text, dies with this hook, and is never posted anywhere.
+  const logRef = useRef<VoiceLogEntry[]>([]);
   const [override, setOverrideState] = useState<Role | null>(null);
   const [activeRoleState, setActiveRoleState] = useState<Role>("rep");
 
   const wantDeepgram = deepgramEnabled();
   const profile = opts?.profile ?? null;
   const voiceprint = useVoiceprint({ enabled: enabled && wantDeepgram, profile });
-  const { status: voiceStatus, onPcm: vpOnPcm, scoreBetween: vpScore, liveVerdict: vpVerdict, liveScore: vpLiveScore, liveCustScore: vpLiveCustScore } = voiceprint;
+  const { status: voiceStatus, onPcm: vpOnPcm, scoreBetween: vpScore, scoreRun, liveVerdict: vpVerdict, liveScore: vpLiveScore, liveCustScore: vpLiveCustScore } = voiceprint;
+  const voiceStatusRef = useRef<VoiceprintStatus>("off");
+  useEffect(() => {
+    voiceStatusRef.current = voiceStatus;
+  });
 
   // The live "Voice match" threshold (from the console slider) → attribution opts. Held in a ref so
   // onDiarized reads the current value without being rebuilt each time the slider moves.
@@ -112,6 +122,75 @@ export function useInPersonSpeech(
     [vpOnPcm],
   );
 
+  const processFinal = useCallback(async (
+    runs: ReturnType<typeof splitRuns>, arrivedAt: number, epoch: number,
+  ) => {
+    try {
+      const scored = voiceStatusRef.current === "ready"
+        ? await Promise.all(runs.map((run) => withTimeout(scoreRun(epoch, run.start, run.end), 600)))
+        : runs.map(() => null);
+      const evidenceByRun = new Map<(typeof runs)[number], VoiceEvidence | null>();
+      runs.forEach((run, i) => {
+        evidenceByRun.set(run, scored[i]?.evidence ?? vpScore(epoch, run.start, run.end));
+      });
+      const res = attributeFinal(
+        mapRef.current,
+        runs,
+        overrideRef.current,
+        (run) => ({ voice: evidenceByRun.get(run) ?? null, text: textCue(run.text, { repName, customerName }) }),
+        { ...attrOptsRef.current, engineReady: voiceStatusRef.current === "ready" },
+      );
+      mapRef.current = res.map;
+      const now = Date.now();
+      const rows: VoiceLogEntry[] = [];
+      res.lines.forEach((line, i) => {
+        const id = emit(line.role, line.text);
+        if (id && line.provisional && overrideRef.current === null) {
+          bookRef.current = noteProvisional(bookRef.current, line.speakerIndex, id, now);
+        }
+        const voice = evidenceByRun.get(runs[i]) ?? null;
+        const row: VoiceLogEntry = {
+          at: now, epoch, idx: line.speakerIndex, text: line.text,
+          sec: voice?.sec ?? null, mean: voice?.mean ?? null, custMean: voice?.custMean ?? null,
+          gap: line.gap, role: line.role, source: line.source, provisional: line.provisional,
+          ms: Date.now() - arrivedAt,
+        };
+        logRef.current = pushLog(logRef.current, row);
+        rows.push(row);
+      });
+      if (process.env.NODE_ENV !== "production") console.table(rows);
+      if (res.rebound.length) {
+        const plan = relabelPlan(bookRef.current, res.rebound, now);
+        bookRef.current = plan.book;
+        for (const id of plan.swapIds) store.swapLocalSpeaker(id, repName, customerName);
+      }
+      if (res.lastRole) {
+        lastFinalRoleRef.current = res.lastRole;
+        setActiveRoleState(overrideRef.current ?? res.lastRole);
+      }
+    } catch {
+      // Attribution failed — never drop the words. Emit each run under the current best role.
+      const role = interimRole(overrideRef.current, lastFinalRoleRef.current, null);
+      const now = Date.now();
+      const rows: VoiceLogEntry[] = [];
+      for (const run of runs) if (run.text) {
+        emit(role, run.text);
+        const row: VoiceLogEntry = {
+          at: now, epoch, idx: run.speakerIndex, text: run.text,
+          sec: null, mean: null, custMean: null, gap: null, role, source: "default",
+          provisional: true, ms: Date.now() - arrivedAt,
+        };
+        logRef.current = pushLog(logRef.current, row);
+        rows.push(row);
+      }
+      if (process.env.NODE_ENV !== "production") console.table(rows);
+      lastFinalRoleRef.current = role;
+      setActiveRoleState(overrideRef.current ?? role);
+    }
+    clearInterim(repName);
+    clearInterim(customerName);
+  }, [clearInterim, customerName, emit, repName, scoreRun, store, vpScore]);
+
   // Deepgram: split the final into per-speaker runs and attribute each with voice + text evidence;
   // interims use the override, the live voice verdict, then the last final's role.
   const onDiarized = useCallback(
@@ -126,6 +205,7 @@ export function useInPersonSpeech(
         }
       };
       if (r.isFinal) {
+        const arrivedAt = Date.now();
         const runs = splitRuns(r.words.length ? r.words : undefined);
         if (runs.length === 0) {
           // No diarized words (diarize hiccup / metadata) — attribute the whole line to the current
@@ -133,41 +213,20 @@ export function useInPersonSpeech(
           const role = interimRole(overrideRef.current, lastFinalRoleRef.current, safeVerdict());
           if (r.transcript) {
             emit(role, r.transcript);
+            const row: VoiceLogEntry = {
+              at: Date.now(), epoch: epochRef.current, idx: -1, text: r.transcript,
+              sec: null, mean: null, custMean: null, gap: null, role, source: "default",
+              provisional: true, ms: Date.now() - arrivedAt,
+            };
+            logRef.current = pushLog(logRef.current, row);
+            if (process.env.NODE_ENV !== "production") console.table([row]);
             lastFinalRoleRef.current = role;
             setActiveRoleState(overrideRef.current ?? role);
           }
         } else {
-          try {
-            const evidence = (run: { speakerIndex: number; text: string; start: number; end: number }) => ({
-              voice: vpScore(epochRef.current, run.start, run.end),
-              text: textCue(run.text, { repName, customerName }),
-            });
-            const res = attributeFinal(mapRef.current, runs, overrideRef.current, evidence, attrOptsRef.current);
-            mapRef.current = res.map;
-            const now = Date.now();
-            for (const line of res.lines) {
-              const id = emit(line.role, line.text);
-              // Book a provisional (non-firm, auto) line so a later firm rebind can relabel it.
-              if (id && line.provisional && overrideRef.current === null) {
-                bookRef.current = noteProvisional(bookRef.current, line.speakerIndex, id, now);
-              }
-            }
-            if (res.rebound.length) {
-              const plan = relabelPlan(bookRef.current, res.rebound, now);
-              bookRef.current = plan.book;
-              for (const id of plan.swapIds) store.swapLocalSpeaker(id, repName, customerName);
-            }
-            if (res.lastRole) {
-              lastFinalRoleRef.current = res.lastRole;
-              setActiveRoleState(overrideRef.current ?? res.lastRole);
-            }
-          } catch {
-            // Attribution failed — never drop the words. Emit each run under the current best role.
-            const role = interimRole(overrideRef.current, lastFinalRoleRef.current, null);
-            for (const run of runs) if (run.text) emit(role, run.text);
-            lastFinalRoleRef.current = role;
-            setActiveRoleState(overrideRef.current ?? role);
-          }
+          const epoch = epochRef.current;
+          queueRef.current = queueRef.current.then(() => processFinal(runs, arrivedAt, epoch)).catch(() => {});
+          return;
         }
         clearInterim(repName);
         clearInterim(customerName);
@@ -175,7 +234,7 @@ export function useInPersonSpeech(
         showInterim(interimRole(overrideRef.current, lastFinalRoleRef.current, safeVerdict()), r.transcript);
       }
     },
-    [emit, showInterim, clearInterim, repName, customerName, store, vpScore, vpVerdict],
+    [emit, showInterim, clearInterim, repName, customerName, processFinal, vpVerdict],
   );
 
   // Web Speech fallback: no diarization, so the manual toggle is the sole source of truth.
@@ -203,6 +262,7 @@ export function useInPersonSpeech(
   const speech: SpeechStatus = engine === "deepgram" ? speechStatusFrom(dgStatus) : browserStatus;
 
   const swapSpeaker = useCallback((id: string) => store.swapLocalSpeaker(id, repName, customerName), [store, repName, customerName]);
+  const voiceLog = useCallback((): readonly VoiceLogEntry[] => logRef.current.slice(), []);
 
   return {
     // LocalSpeech surface (consumed by useTranscript)
@@ -223,5 +283,6 @@ export function useInPersonSpeech(
     liveScore: vpLiveScore,
     liveCustScore: vpLiveCustScore,
     swapSpeaker,
+    voiceLog,
   };
 }

@@ -46,6 +46,7 @@ const { lastFromCustomer, newestAt, toTurns, windowToSend, applyLineEdit, applyS
 const { splitRuns, emptySpeakerMap, attributeFinal, interimRole, noteProvisional, relabelPlan, optsForThreshold, VOICE_DEADZONE, DEFAULT_ATTRIBUTE_OPTS } = await import("../src/lib/diarize.ts");
 const { textCue } = await import("../src/lib/speaker-cues.ts");
 const { pushSample, scoreBetween, recentVerdict } = await import("../src/lib/voice-ring.ts");
+const { pushLog, withTimeout } = await import("../src/lib/voice-log.ts");
 // Voice feature/window maths are pure and safe to import here; engine.ts (onnxruntime-web) is NOT.
 const { melSpectrogram, logMelFrame, melCentersHz, N_MELS } = await import("../src/lib/voice/features.ts");
 const { fitWindow, tileWindow, cosine, meanEmbedding, WINDOW_SAMPLES, RingBuffer } = await import("../src/lib/voice/window.ts");
@@ -70,6 +71,18 @@ const { fixTerms } = await import("../src/lib/terms.ts");
 type Detection = import("../src/lib/agent/types.ts").Detection;
 type Lookahead = import("../src/lib/agent/types.ts").Lookahead;
 type Turn = import("../src/lib/agent/types.ts").Turn;
+
+test("withTimeout: resolves fast values and null for slow or rejected work", async () => {
+  assert.strictEqual(await withTimeout(Promise.resolve("fast"), 20), "fast");
+  assert.strictEqual(await withTimeout(new Promise((resolve) => setTimeout(() => resolve("slow"), 20)), 2), null);
+  assert.strictEqual(await withTimeout(Promise.reject(new Error("nope")), 20), null);
+});
+
+test("pushLog: caps at 200 with the newest entry last", () => {
+  let ring: number[] = [];
+  for (let i = 0; i < 205; i++) ring = pushLog(ring, i);
+  assert.deepStrictEqual([ring.length, ring[0], ring.at(-1)], [200, 5, 204]);
+});
 
 const AREA = "Health Protection";
 const AT = Date.UTC(2026, 7, 20, 6, 30, 0);

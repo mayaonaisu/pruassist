@@ -16,6 +16,7 @@ export type VoiceprintStatus = "off" | "loading" | "ready" | "error";
 type WorkerOut =
   | { type: "ready" }
   | { type: "score"; epoch: number; t0: number; t1: number; score: number; custSim?: number | null }
+  | { type: "run-score"; reqId: number; ok: boolean; repSim?: number; custSim?: number | null; voicedSec?: number }
   | { type: "embedding"; embedding: Float32Array }
   | { type: "error"; message: string };
 
@@ -23,6 +24,8 @@ export type Voiceprint = {
   status: VoiceprintStatus;
   onPcm: PcmTap;
   scoreBetween: (epoch: number, start: number, end: number) => VoiceEvidence | null;
+  // Includes the request id so Step 4 can label the exact embedding behind a decision.
+  scoreRun: (epoch: number, start: number, end: number) => Promise<{ evidence: VoiceEvidence | null; reqId: number }>;
   liveVerdict: (hi?: number, lo?: number, margin?: number) => Role | null;
   liveScore: () => number | null; // newest rep similarity, for the tuning meter
   liveCustScore: () => number | null; // newest customer-centroid similarity (null until seeded)
@@ -38,6 +41,8 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
   const ringRef = useRef<ScoreSample[]>([]);
   const lastEpochRef = useRef(0);
   const lastTSecRef = useRef(0);
+  const nextReqIdRef = useRef(1);
+  const pendingRunsRef = useRef(new Map<number, (evidence: VoiceEvidence | null) => void>());
 
   const active = enabled && !!profile;
   const status: VoiceprintStatus = !active ? "off" : outcome;
@@ -49,7 +54,14 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
     // + toggle), never throw out of the effect (which would unmount the console and blank the transcript).
     // Defer error-state updates out of the synchronous effect body (queueMicrotask) — the async worker
     // handlers below may call setOutcome directly.
-    const fail = () => queueMicrotask(() => setOutcome("error"));
+    const resolvePending = () => {
+      for (const resolve of pendingRunsRef.current.values()) resolve(null);
+      pendingRunsRef.current.clear();
+    };
+    const fail = () => {
+      resolvePending();
+      queueMicrotask(() => setOutcome("error"));
+    };
     let worker: Worker;
     try {
       worker = new Worker(new URL("./voice/voice.worker.ts", import.meta.url), { type: "module" });
@@ -58,7 +70,7 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
       return;
     }
     workerRef.current = worker;
-    worker.onerror = () => setOutcome("error");
+    worker.onerror = fail;
     worker.onmessage = (e: MessageEvent<WorkerOut>) => {
       try {
         const msg = e.data;
@@ -74,10 +86,21 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
             score: msg.score,
             custSim: msg.custSim ?? null,
           });
+        } else if (msg.type === "run-score") {
+          const resolve = pendingRunsRef.current.get(msg.reqId);
+          if (resolve) {
+            pendingRunsRef.current.delete(msg.reqId);
+            resolve(msg.ok && msg.repSim != null && msg.voicedSec != null ? {
+              mean: msg.repSim, n: 1, sec: msg.voicedSec, custMean: msg.custSim ?? null,
+              custN: msg.custSim != null ? 1 : 0,
+            } : null);
+          }
         } else if (msg.type === "error") {
+          resolvePending();
           setOutcome("error");
         }
       } catch {
+        resolvePending();
         setOutcome("error");
       }
     };
@@ -87,6 +110,7 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
       fail();
     }
     return () => {
+      resolvePending();
       try {
         worker.terminate();
       } catch {
@@ -96,6 +120,21 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
       ringRef.current = [];
     };
   }, [active, profile]);
+
+  const scoreRun = useCallback((epoch: number, start: number, end: number) => {
+    const reqId = nextReqIdRef.current++;
+    const worker = workerRef.current;
+    if (!worker) return Promise.resolve({ evidence: null, reqId });
+    return new Promise<{ evidence: VoiceEvidence | null; reqId: number }>((resolve) => {
+      pendingRunsRef.current.set(reqId, (evidence) => resolve({ evidence, reqId }));
+      try {
+        worker.postMessage({ type: "score-run", reqId, epoch, start, end });
+      } catch {
+        pendingRunsRef.current.delete(reqId);
+        resolve({ evidence: null, reqId });
+      }
+    });
+  }, []);
 
   // Stable over refs so it never restarts the diarized socket's capture effect. Forwards the frame to
   // the worker (transferring its buffer — the tap always hands us a fresh copy).
@@ -137,5 +176,5 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
     fetch(VOICE_MODEL_URL, { cache: "force-cache" }).catch(() => {});
   }, []);
 
-  return { status, onPcm, scoreBetween, liveVerdict, liveScore, liveCustScore, warm };
+  return { status, onPcm, scoreBetween, scoreRun, liveVerdict, liveScore, liveCustScore, warm };
 }
