@@ -57,9 +57,12 @@ export function splitRuns(words: DiarizedWord[] | undefined): SpeakerRun[] {
 
 /* ---------- evidence-based binding ---------- */
 
-// Similarity to the rep's voiceprint over a run's audio window: the cumulative mean and how many
-// scored windows fed it. (mean is cosine similarity in [-1, 1]; n weights it when folded into stats.)
-export type VoiceEvidence = { mean: number; n: number };
+// Voiceprint evidence over a run's audio window. `mean`/`n` are the similarity to the REP's enrolled
+// voiceprint (cosine in [-1, 1]) and how many scored windows fed it. `custMean`/`custN` are the same
+// against the session's learned CUSTOMER centroid, present only once that centroid has been seeded — so
+// attribution can decide by which voice a run is CLOSER to (a margin), which is robust to loudness / mic
+// distance / room in a way an absolute threshold is not.
+export type VoiceEvidence = { mean: number; n: number; custMean?: number | null; custN?: number };
 
 // Text-cue votes for one run (see speaker-cues.ts). Summed across an index's runs before deciding.
 export type TextCue = { repVotes: number; customerVotes: number };
@@ -67,8 +70,9 @@ export type TextCue = { repVotes: number; customerVotes: number };
 // What the caller can supply per run. Either half may be absent (engine off, run too short, no cues).
 export type SpeakerEvidence = { voice?: VoiceEvidence | null; text?: TextCue | null };
 
-// Accumulated evidence for one speaker index across the runs seen so far.
-export type SpeakerStats = { voiceSum: number; voiceN: number; textRep: number; textCust: number; runs: number };
+// Accumulated evidence for one speaker index across the runs seen so far. custSum/custN accumulate the
+// customer-centroid similarity, parallel to voiceSum/voiceN for the rep.
+export type SpeakerStats = { voiceSum: number; voiceN: number; custSum: number; custN: number; textRep: number; textCust: number; runs: number };
 
 // The learned binding index → role. `firm` marks a binding made by voice or the manual override, which
 // text and the no-evidence default may never overwrite; a provisional binding (text/default) may. `stats`
@@ -84,13 +88,14 @@ export function emptySpeakerMap(): SpeakerMap {
   return { assigned: {}, firm: {}, stats: {}, calibrated: false };
 }
 
-// Thresholds. voiceHi/Lo bracket the cosine similarity that counts as rep/customer; voiceMinN is how
-// many scored windows a verdict needs; flipMinN is the (larger) count needed to overturn a FIRM binding
-// (hysteresis, so one contrary window cannot flap it); textMargin is the vote gap a text verdict needs.
-// The 0.5 / 0.3 similarity guidance is the reference package's — the /rep/voice "test your voice" meter
-// is the tool for tuning them to a room.
-export type AttributeOpts = { voiceHi: number; voiceLo: number; voiceMinN: number; flipMinN: number; textMargin: number };
-export const DEFAULT_ATTRIBUTE_OPTS: AttributeOpts = { voiceHi: 0.5, voiceLo: 0.3, voiceMinN: 2, flipMinN: 4, textMargin: 2 };
+// Thresholds. voiceHi/Lo bracket the cosine similarity that counts as rep/customer BEFORE a customer
+// centroid exists (the absolute fallback); voiceMargin is how much closer to the rep than to the
+// customer a run must be ONCE the centroid exists (the robust, relative decision). voiceMinN is how many
+// scored windows a verdict needs; flipMinN is the (larger) count needed to overturn a FIRM binding
+// (hysteresis); textMargin is the vote gap a text verdict needs. The 0.5 / 0.3 absolute guidance is the
+// reference package's; the relative margin is what the "test your voice" / in-console meters help tune.
+export type AttributeOpts = { voiceHi: number; voiceLo: number; voiceMargin: number; voiceMinN: number; flipMinN: number; textMargin: number };
+export const DEFAULT_ATTRIBUTE_OPTS: AttributeOpts = { voiceHi: 0.5, voiceLo: 0.3, voiceMargin: 0.05, voiceMinN: 2, flipMinN: 4, textMargin: 2 };
 
 // The gap the in-person "Voice match" slider keeps between the rep threshold and the customer
 // threshold — the dead zone that stops one borderline window from flip-flapping the binding.
@@ -108,7 +113,7 @@ export function optsForThreshold(voiceHi: number, base: AttributeOpts = DEFAULT_
 export type Rebind = { speakerIndex: number; from: Role; to: Role };
 
 function emptyStats(): SpeakerStats {
-  return { voiceSum: 0, voiceN: 0, textRep: 0, textCust: 0, runs: 0 };
+  return { voiceSum: 0, voiceN: 0, custSum: 0, custN: 0, textRep: 0, textCust: 0, runs: 0 };
 }
 
 /**
@@ -184,6 +189,10 @@ export function attributeFinal(
     if (ev?.voice && ev.voice.n > 0) {
       s.voiceSum += ev.voice.mean * ev.voice.n;
       s.voiceN += ev.voice.n;
+      if (ev.voice.custMean != null && ev.voice.custN) {
+        s.custSum += ev.voice.custMean * ev.voice.custN;
+        s.custN += ev.voice.custN;
+      }
     }
     if (ev?.text) {
       s.textRep += ev.text.repVotes;
@@ -201,9 +210,17 @@ export function attributeFinal(
 
     let voiceRole: Role | null = null;
     if (s.voiceN >= opts.voiceMinN) {
-      const m = s.voiceSum / s.voiceN;
-      if (m >= opts.voiceHi) voiceRole = "rep";
-      else if (m <= opts.voiceLo) voiceRole = "customer";
+      const repMean = s.voiceSum / s.voiceN;
+      if (s.custN > 0) {
+        // Relative decision: which voice is this index closer to? Robust to loudness / mic / room.
+        const gap = repMean - s.custSum / s.custN;
+        if (gap >= opts.voiceMargin) voiceRole = "rep";
+        else if (gap <= -opts.voiceMargin) voiceRole = "customer";
+      } else {
+        // No customer centroid yet — fall back to the absolute threshold (the slider's value).
+        if (repMean >= opts.voiceHi) voiceRole = "rep";
+        else if (repMean <= opts.voiceLo) voiceRole = "customer";
+      }
     }
     let textRole: Role | null = null;
     const d = s.textRep - s.textCust;

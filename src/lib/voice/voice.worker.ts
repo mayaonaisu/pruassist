@@ -43,6 +43,14 @@ let ringEpoch = -1;
 let lastScoredSec = -Infinity;
 let scoring = false; // in-flight embed guard — skip a hop rather than queue
 
+// Learned customer voice centroid (session/connection-scoped). custSum is the running un-normalised sum
+// of embeddings from windows clearly NOT the rep; custCount caps its growth. Lets attribution decide by
+// which voice a window is CLOSER to, instead of an absolute cutoff.
+let custSum: Float32Array | null = null;
+let custCount = 0;
+const CUST_CAP = 40; // stop growing after ~40 customer windows — plenty and keeps the centroid stable
+const SEED_LO = 0.35; // a window this dissimilar to the rep seeds/grows the customer centroid
+
 // Enrolment state.
 let enrollFrames: Float32Array[] = [];
 
@@ -52,6 +60,15 @@ function rms(x: Float32Array): number {
   return Math.sqrt(s / (x.length || 1));
 }
 
+function normalized(v: Float32Array): Float32Array {
+  let n = 0;
+  for (let i = 0; i < v.length; i++) n += v[i] * v[i];
+  n = Math.sqrt(n) || 1;
+  const out = new Float32Array(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = v[i] / n;
+  return out;
+}
+
 function onPcm(frame: Float32Array, epoch: number): void {
   const prof = profile;
   if (!engine || !prof) return; // nothing to score against yet
@@ -59,6 +76,8 @@ function onPcm(frame: Float32Array, epoch: number): void {
     ring = new RingBuffer(RING_CAPACITY);
     ringEpoch = epoch;
     lastScoredSec = -Infinity;
+    custSum = null; // a new connection is a fresh room — relearn the customer's voice
+    custCount = 0;
   }
   ring.append(frame);
 
@@ -78,7 +97,18 @@ function onPcm(frame: Float32Array, epoch: number): void {
   const t1 = endSample / SAMPLE_RATE;
   engine
     .embed(win)
-    .then((emb) => ctx.postMessage({ type: "score", epoch, t0, t1, score: cosine(emb, prof) }))
+    .then((emb) => {
+      const repSim = cosine(emb, prof);
+      const custSim = custCount > 0 && custSum ? cosine(emb, normalized(custSum)) : null;
+      // Grow the customer centroid from windows clearly not the rep — and, once a centroid exists, only
+      // when the window is at least as close to the customer as to the rep, so rep audio can't pollute it.
+      if (repSim <= SEED_LO && (custSim == null || custSim >= repSim) && custCount < CUST_CAP) {
+        if (!custSum) custSum = new Float32Array(emb.length);
+        for (let i = 0; i < emb.length; i++) custSum[i] += emb[i];
+        custCount += 1;
+      }
+      ctx.postMessage({ type: "score", epoch, t0, t1, score: repSim, custSim });
+    })
     .catch((err) => ctx.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) }))
     .finally(() => {
       scoring = false;

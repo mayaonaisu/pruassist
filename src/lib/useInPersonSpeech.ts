@@ -41,7 +41,8 @@ export type InPersonSpeech = LocalSpeech & {
   micPaused: boolean;
   status: DeepgramStatus | SpeechStatus;
   voiceStatus: VoiceprintStatus; // whether the rep's voiceprint is loaded and scoring
-  liveScore: () => number | null; // newest voiceprint similarity, for the tuning meter
+  liveScore: () => number | null; // newest rep similarity, for the tuning meter
+  liveCustScore: () => number | null; // newest customer-centroid similarity (null until seeded)
   swapSpeaker: (id: string) => void; // per-line correction
 };
 
@@ -65,7 +66,7 @@ export function useInPersonSpeech(
   const wantDeepgram = deepgramEnabled();
   const profile = opts?.profile ?? null;
   const voiceprint = useVoiceprint({ enabled: enabled && wantDeepgram, profile });
-  const { status: voiceStatus, onPcm: vpOnPcm, scoreBetween: vpScore, liveVerdict: vpVerdict, liveScore: vpLiveScore } = voiceprint;
+  const { status: voiceStatus, onPcm: vpOnPcm, scoreBetween: vpScore, liveVerdict: vpVerdict, liveScore: vpLiveScore, liveCustScore: vpLiveCustScore } = voiceprint;
 
   // The live "Voice match" threshold (from the console slider) → attribution opts. Held in a ref so
   // onDiarized reads the current value without being rebuilt each time the slider moves.
@@ -119,7 +120,7 @@ export function useInPersonSpeech(
       // wrappers guarantee the customer's words are emitted even if scoring ever fails.
       const safeVerdict = (): Role | null => {
         try {
-          return vpVerdict(attrOptsRef.current.voiceHi, attrOptsRef.current.voiceLo);
+          return vpVerdict(attrOptsRef.current.voiceHi, attrOptsRef.current.voiceLo, attrOptsRef.current.voiceMargin);
         } catch {
           return null;
         }
@@ -220,6 +221,7 @@ export function useInPersonSpeech(
     status,
     voiceStatus: engine === "deepgram" ? voiceStatus : "off",
     liveScore: vpLiveScore,
+    liveCustScore: vpLiveCustScore,
     swapSpeaker,
   };
 }

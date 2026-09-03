@@ -2440,6 +2440,6 @@ button {
   font-family: var(--font-mono);
   white-space: nowrap;
   color: var(--ink-3);
-  min-width: 78px;
+  min-width: 168px;
   text-align: right;
 }

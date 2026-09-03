@@ -15,6 +15,7 @@ import { useWakeLock } from "@/lib/useWakeLock";
 import { unlockAudio } from "@/lib/useDiarizedSpeech";
 import { resolveHotkey } from "@/lib/hotkeys";
 import { transcriptText } from "@/lib/transcript";
+import { DEFAULT_ATTRIBUTE_OPTS } from "@/lib/diarize";
 import type { Comprehension, SessionInfo, Stats } from "@/lib/console-types";
 
 const ZERO_STATS: Stats = { surfaced: 0, used: 0, flags: 0, docs: 0 };
@@ -146,17 +147,22 @@ function InPersonConsole({
   const [sharing, setSharing] = useState(false);
   const [board, boardDispatch] = useReducer(reduceBoard, initialBoardState);
 
-  // Live voiceprint similarity for the in-console "Voice match" tuning meter — polled only while the
+  // Live voiceprint similarities for the in-console "Voice match" tuning meter — polled only while the
   // tuner is on screen (rep view, voiceprint ready). setState happens in the interval callback, never
   // synchronously in the effect.
   const [liveScore, setLiveScore] = useState<number | null>(null);
+  const [liveCust, setLiveCust] = useState<number | null>(null);
   const voiceReady = speech.engine === "deepgram" && speech.voiceStatus === "ready";
   const liveScoreFn = speech.liveScore;
+  const liveCustFn = speech.liveCustScore;
   useEffect(() => {
     if (!voiceReady || sharing) return;
-    const t = setInterval(() => setLiveScore(liveScoreFn()), 250);
+    const t = setInterval(() => {
+      setLiveScore(liveScoreFn());
+      setLiveCust(liveCustFn());
+    }, 250);
     return () => clearInterval(t);
-  }, [voiceReady, sharing, liveScoreFn]);
+  }, [voiceReady, sharing, liveScoreFn, liveCustFn]);
 
   const [startedAt, setStartedAt] = useState(0);
   const startRef = useRef(0);
@@ -353,8 +359,9 @@ function InPersonConsole({
         </div>
       )}
 
-      {/* Solo-tuning control: watch your own live similarity and set where "you" begins. Rep view only,
-          and only when the voiceprint is scoring; hidden from the customer while sharing. */}
+      {/* Solo-tuning control: watch your live "you" vs "cust" similarity. Once the customer has spoken
+          enough, attribution decides by which voice is closer (the gap) and the slider is just the
+          fallback used until then. Rep view only, hidden from the customer while sharing. */}
       {!sharing && voiceReady && (
         <div className="voice-tune" role="group" aria-label="Voice match sensitivity">
           <span className="voice-tune-label">Voice match</span>
@@ -366,26 +373,32 @@ function InPersonConsole({
             value={voiceThreshold}
             onChange={(e) => changeThreshold(parseFloat(e.target.value))}
             className="voice-slider"
-            aria-label="Voice match threshold"
+            title="Fallback threshold, used until the customer's voice is learned"
+            aria-label="Voice match fallback threshold"
           />
-          <span className="voice-tune-val" title="Similarity at or above this counts as you">
-            ≥ {voiceThreshold.toFixed(2)} = you
-          </span>
           <span
             className={`voice-meter voice-tune-meter ${
               liveScore == null
                 ? ""
-                : liveScore >= voiceThreshold
-                  ? "voice-meter-hi"
-                  : liveScore <= voiceThreshold - 0.2
-                    ? "voice-meter-lo"
-                    : "voice-meter-mid"
+                : liveCust != null
+                  ? liveScore - liveCust >= DEFAULT_ATTRIBUTE_OPTS.voiceMargin
+                    ? "voice-meter-hi"
+                    : liveCust - liveScore >= DEFAULT_ATTRIBUTE_OPTS.voiceMargin
+                      ? "voice-meter-lo"
+                      : "voice-meter-mid"
+                  : liveScore >= voiceThreshold
+                    ? "voice-meter-hi"
+                    : liveScore <= voiceThreshold - 0.2
+                      ? "voice-meter-lo"
+                      : "voice-meter-mid"
             }`}
             aria-hidden
           >
             <div className="voice-meter-fill" style={{ width: `${liveScore == null ? 0 : Math.round(((liveScore + 1) / 2) * 100)}%` }} />
           </span>
-          <span className="voice-tune-live">{liveScore == null ? "listening…" : `live ${liveScore.toFixed(2)}`}</span>
+          <span className="voice-tune-live">
+            {liveScore == null ? "listening…" : `you ${liveScore.toFixed(2)} · cust ${liveCust != null ? liveCust.toFixed(2) : "learning…"}`}
+          </span>
         </div>
       )}
 

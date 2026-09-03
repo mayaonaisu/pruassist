@@ -15,7 +15,7 @@ export type VoiceprintStatus = "off" | "loading" | "ready" | "error";
 
 type WorkerOut =
   | { type: "ready" }
-  | { type: "score"; epoch: number; t0: number; t1: number; score: number }
+  | { type: "score"; epoch: number; t0: number; t1: number; score: number; custSim?: number | null }
   | { type: "embedding"; embedding: Float32Array }
   | { type: "error"; message: string };
 
@@ -23,8 +23,9 @@ export type Voiceprint = {
   status: VoiceprintStatus;
   onPcm: PcmTap;
   scoreBetween: (epoch: number, start: number, end: number) => VoiceEvidence | null;
-  liveVerdict: (hi?: number, lo?: number) => Role | null;
-  liveScore: () => number | null; // the newest similarity, for the tuning meter (threshold-independent)
+  liveVerdict: (hi?: number, lo?: number, margin?: number) => Role | null;
+  liveScore: () => number | null; // newest rep similarity, for the tuning meter
+  liveCustScore: () => number | null; // newest customer-centroid similarity (null until seeded)
   warm: () => void;
 };
 
@@ -66,7 +67,13 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
           worker.postMessage({ type: "profile", embedding: copy }, [copy.buffer]);
           setOutcome("ready");
         } else if (msg.type === "score") {
-          ringRef.current = pushSample(ringRef.current, { epoch: msg.epoch, t0: msg.t0, t1: msg.t1, score: msg.score });
+          ringRef.current = pushSample(ringRef.current, {
+            epoch: msg.epoch,
+            t0: msg.t0,
+            t1: msg.t1,
+            score: msg.score,
+            custSim: msg.custSim ?? null,
+          });
         } else if (msg.type === "error") {
           setOutcome("error");
         }
@@ -110,23 +117,25 @@ export function useVoiceprint({ enabled, profile }: { enabled: boolean; profile:
   );
 
   const liveVerdict = useCallback(
-    (hi: number = DEFAULT_ATTRIBUTE_OPTS.voiceHi, lo: number = DEFAULT_ATTRIBUTE_OPTS.voiceLo) =>
-      recentVerdict(ringRef.current, lastEpochRef.current, lastTSecRef.current, hi, lo),
+    (hi: number = DEFAULT_ATTRIBUTE_OPTS.voiceHi, lo: number = DEFAULT_ATTRIBUTE_OPTS.voiceLo, margin: number = DEFAULT_ATTRIBUTE_OPTS.voiceMargin) =>
+      recentVerdict(ringRef.current, lastEpochRef.current, lastTSecRef.current, hi, lo, 4, margin),
     [],
   );
 
-  // The newest similarity of the current epoch (any age), for the live tuning meter.
-  const liveScore = useCallback((): number | null => {
+  // The newest sample of the current epoch (any age), for the live tuning meters.
+  const latestSample = (): ScoreSample | null => {
     let latest: ScoreSample | null = null;
     for (const s of ringRef.current) {
       if (s.epoch === lastEpochRef.current && (!latest || s.t1 > latest.t1)) latest = s;
     }
-    return latest ? latest.score : null;
-  }, []);
+    return latest;
+  };
+  const liveScore = useCallback((): number | null => latestSample()?.score ?? null, []);
+  const liveCustScore = useCallback((): number | null => latestSample()?.custSim ?? null, []);
 
   const warm = useCallback(() => {
     fetch(VOICE_MODEL_URL, { cache: "force-cache" }).catch(() => {});
   }, []);
 
-  return { status, onPcm, scoreBetween, liveVerdict, liveScore, warm };
+  return { status, onPcm, scoreBetween, liveVerdict, liveScore, liveCustScore, warm };
 }

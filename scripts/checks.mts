@@ -1147,7 +1147,7 @@ const word = (w: string, speaker: number | undefined, punct?: string) =>
 // A run with explicit word times, for evidence windows keyed on [start, end].
 const run = (speakerIndex: number, text: string, start = 0, end = 0) => ({ speakerIndex, text, start, end });
 
-const emptyStats = () => ({ voiceSum: 0, voiceN: 0, textRep: 0, textCust: 0, runs: 0 });
+const emptyStats = () => ({ voiceSum: 0, voiceN: 0, custSum: 0, custN: 0, textRep: 0, textCust: 0, runs: 0 });
 // A firmly-bound SpeakerMap for tests that start mid-session (post-calibration), replacing the old
 // `{ assigned, calibrated }` literals now that the map carries `firm` and `stats` too.
 const bindMap = (roles: Record<number, "rep" | "customer">) => {
@@ -1294,6 +1294,22 @@ test("optsForThreshold: maps the slider value to voiceHi and a dead-zone voiceLo
   assert.strictEqual(optsForThreshold(-2).voiceLo, -1); // voiceLo clamped too
 });
 
+test("attributeFinal: with a customer centroid it decides by the closer voice, not the absolute cutoff", () => {
+  // repMean 0.5 (≥ the old absolute voiceHi) but the run is CLOSER to the customer centroid → customer.
+  const toCust = attributeFinal(emptySpeakerMap(), [run(1, "a", 0, 3)], null, () => ({ voice: { mean: 0.5, n: 2, custMean: 0.62, custN: 2 } }));
+  assert.strictEqual(toCust.lines[0].role, "customer");
+  assert.strictEqual(toCust.map.assigned[1], "customer");
+  // repMean 0.45 (< the old voiceHi) but clearly closer to the rep than the customer → rep.
+  const toRep = attributeFinal(emptySpeakerMap(), [run(0, "b", 0, 3)], null, () => ({ voice: { mean: 0.45, n: 2, custMean: 0.2, custN: 2 } }));
+  assert.strictEqual(toRep.lines[0].role, "rep");
+});
+
+test("attributeFinal: a run within the margin of both voices gets no voice verdict", () => {
+  const r = attributeFinal(emptySpeakerMap(), [run(0, "x", 0, 3)], null, () => ({ voice: { mean: 0.5, n: 2, custMean: 0.48, custN: 2 } }));
+  assert.strictEqual(r.lines[0].role, "rep"); // gap 0.02 < margin 0.05 → no voice verdict → rep-first default
+  assert.strictEqual(r.lines[0].provisional, true); // a default, not a firm voice binding
+});
+
 test("interimRole: override, else live voice, else last final, else rep", () => {
   assert.strictEqual(interimRole("customer", "rep"), "customer");
   assert.strictEqual(interimRole(null, "customer"), "customer");
@@ -1332,37 +1348,45 @@ test("textCue: addressing the other person by first name nudges the right way", 
   assert.ok(toRep.customerVotes >= 1);
 });
 
-test("voice-ring: scoreBetween overlap-weights and isolates by epoch", () => {
+test("voice-ring: scoreBetween overlap-weights rep and customer sims and isolates by epoch", () => {
   const ring = [
-    { epoch: 1, t0: 0, t1: 3, score: 0.8 },
-    { epoch: 1, t0: 3, t1: 6, score: 0.2 },
-    { epoch: 2, t0: 0, t1: 3, score: 1.0 },
+    { epoch: 1, t0: 0, t1: 3, score: 0.8, custSim: 0.1 },
+    { epoch: 1, t0: 3, t1: 6, score: 0.2, custSim: 0.3 },
+    { epoch: 2, t0: 0, t1: 3, score: 1.0, custSim: null },
   ];
-  const ev = scoreBetween(ring, 1, 2, 4); // [2,3] of the 0.8 window, [3,4] of the 0.2 window
+  const ev = scoreBetween(ring, 1, 2, 4); // [2,3] of the first window, [3,4] of the second
   assert.ok(ev);
   assert.strictEqual(ev!.n, 2);
-  assert.ok(Math.abs(ev!.mean - 0.5) < 1e-9); // (0.8*1 + 0.2*1) / 2
-  // epoch 2's sample also spans [2,4] but is ignored when querying epoch 1.
-  assert.strictEqual(scoreBetween(ring, 1, 0, 100)!.n, 2);
+  assert.ok(Math.abs(ev!.mean - 0.5) < 1e-9); // (0.8 + 0.2) / 2
+  assert.strictEqual(ev!.custN, 2);
+  assert.ok(Math.abs((ev!.custMean ?? 0) - 0.2) < 1e-9); // (0.1 + 0.3) / 2
+  assert.strictEqual(scoreBetween(ring, 1, 0, 100)!.n, 2); // epoch 2 ignored when querying epoch 1
   assert.strictEqual(scoreBetween(ring, 9, 0, 100), null);
+  // No customer similarity on any overlapping sample → custMean null, custN 0.
+  const noCust = scoreBetween([{ epoch: 1, t0: 0, t1: 3, score: 0.8, custSim: null }], 1, 0, 3);
+  assert.strictEqual(noCust!.custMean, null);
+  assert.strictEqual(noCust!.custN, 0);
 });
 
 test("voice-ring: pushSample drops older epochs and stale samples", () => {
-  let ring = pushSample([], { epoch: 1, t0: 0, t1: 3, score: 0.9 });
-  ring = pushSample(ring, { epoch: 2, t0: 0, t1: 3, score: 0.1 }); // reconnect → epoch 1 dropped
+  let ring = pushSample([], { epoch: 1, t0: 0, t1: 3, score: 0.9, custSim: null });
+  ring = pushSample(ring, { epoch: 2, t0: 0, t1: 3, score: 0.1, custSim: null }); // reconnect → epoch 1 dropped
   assert.ok(ring.every((s) => s.epoch === 2));
-  ring = pushSample(ring, { epoch: 2, t0: 200, t1: 203, score: 0.5 }, 120); // 200 s later
+  ring = pushSample(ring, { epoch: 2, t0: 200, t1: 203, score: 0.5, custSim: null }, 120); // 200 s later
   assert.ok(ring.every((s) => s.t1 >= 200)); // the t1=3 sample is >120 s behind → pruned
 });
 
-test("voice-ring: recentVerdict reads only the latest window and respects staleness", () => {
+test("voice-ring: recentVerdict uses the margin when a customer sim is present, else absolute", () => {
   const ring = [
-    { epoch: 1, t0: 0, t1: 3, score: 0.2 },
-    { epoch: 1, t0: 3, t1: 6, score: 0.9 },
+    { epoch: 1, t0: 0, t1: 3, score: 0.2, custSim: null },
+    { epoch: 1, t0: 3, t1: 6, score: 0.9, custSim: null },
   ];
-  assert.strictEqual(recentVerdict(ring, 1, 6.5, 0.5, 0.3), "rep"); // latest (0.9) is rep-like and fresh
+  assert.strictEqual(recentVerdict(ring, 1, 6.5, 0.5, 0.3), "rep"); // absolute: latest 0.9 is rep-like
   assert.strictEqual(recentVerdict(ring, 1, 20, 0.5, 0.3), null); // latest ended 14 s ago → stale
   assert.strictEqual(recentVerdict(ring, 2, 6.5, 0.5, 0.3), null); // wrong epoch
+  // Margin mode: the latest window carries a customer sim → decide by the gap, not the absolute cutoff.
+  assert.strictEqual(recentVerdict([{ epoch: 1, t0: 0, t1: 3, score: 0.45, custSim: 0.6 }], 1, 3.5, 0.5, 0.3, 4, 0.05), "customer");
+  assert.strictEqual(recentVerdict([{ epoch: 1, t0: 0, t1: 3, score: 0.6, custSim: 0.4 }], 1, 3.5, 0.5, 0.3, 4, 0.05), "rep");
 });
 
 test("provisional book: relabelPlan swaps rebound ids and keeps untouched indices", () => {
